@@ -1,0 +1,40 @@
+# configuration section. each field should be supplied!
+---
+# base commands. extra commands will be added as suffix, shell environment(typically gpu) will be added as prefix
+commands:
+  train: >
+    echo python train.py
+  test: >
+    echo python test.py
+
+# rename a group of parameters for easier readability
+remaps:
+  # ffn-embed=666 will results in encoder-ffn-embed-dim=decoder-ffn-embed-dim=666
+  ffn-embed: [ encoder-ffn-embed-dim, decoder-ffn-embed-dim ]
+  embed-dim: [ encoder-embed-dim, decoder-embed-dim ]
+  # arch=preln will be replaced as encoder-normalize-before=True, decoder-normalize-before=True
+  arch: # remap
+    preln: { encoder-normalize-before: True, decoder-normalize-before: True }
+    postln: { encoder-normalize-before: False, decoder-normalize-before: False }
+
+# directories parameters specific to training script. they will be prefixed by a shorten parameter name.
+dirs:
+  tensorboard-logdir: ""
+  save-dir: ""
+
+# gpu indices to be filled in CUDA_VISIBLE_DEVICES={}. each resource is assigned to a worker.
+# for multi-gpu tasks, simply set [ "1,2", "3,4" ]
+# a single resource can be assigned multiple times, typically when your task requires a very low gpu utilization
+# [ "1", "2", "3", "1", "2", "3" ]
+resources: [ "1", "2", "3" ]
+
+# list all possible choices here, tune.py will sweep all possible combinations.
+---
+# parameter choices 1
+arch: [ preln, postln ]
+ffn-dim: [ 666, 555, 333 ]
+
+---
+# parameter choices 2
+arch: [ preln, postln ]
+ffn-dim: [ 768, 584 ]
