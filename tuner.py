@@ -2,6 +2,7 @@
 import asyncio
 import argparse
 import yaml
+import copy
 import random
 import itertools
 import re
@@ -141,12 +142,14 @@ def parse_yaml(filename):
         commands[key] = value.strip()
 
     remaps = config["remaps"]
-    for key, value in remaps.items():
-        assert isinstance(value, (list, dict)), \
-            "Invalid yaml format: '{}' in 'remaps' should be a list or dict.".format(field)
+    if remaps:
+        for key, value in remaps.items():
+            assert isinstance(value, (list, dict)), \
+                "Invalid yaml format: '{}' in 'remaps' should be a list or dict.".format(field)
 
     dirs = config["dirs"]
-    assert isinstance(dirs, dict), "Invalid yaml format: 'dirs' should be a dict."
+    if dirs:
+        assert isinstance(dirs, dict), "Invalid yaml format: 'dirs' should be a dict."
 
     resources = config["resources"]
     assert isinstance(resources, list), \
@@ -158,6 +161,9 @@ def parse_yaml(filename):
 
 
 def remap_param_dict(param_dict, remaps):
+    if not remaps:
+        return copy.deepcopy(param_dict)
+
     new_param_dict = {}
     for key, value in param_dict.items():
         if key in remaps:
@@ -186,8 +192,9 @@ def build_tasks(base_commands, remaps, dirs, choices, output, run=None, first=Fa
         base_dir = os.path.join(output, name)
         param_dict = remap_param_dict(param_dict, remaps)
         # assign directories params to param_dict
-        for key, value in dirs.items():
-            param_dict[key] = maybe_mkdir(os.path.join(base_dir, value))
+        if dirs:
+            for key, value in dirs.items():
+                param_dict[key] = maybe_mkdir(os.path.join(base_dir, value))
 
         # build execution commands
         commands = {}
