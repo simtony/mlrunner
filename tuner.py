@@ -69,6 +69,8 @@ def snake2camel(snake_str, shrink_keep=0):
     "a_snake_case_string" to "ASnCaString"
     """
     components = snake_str.split('-')
+    if len(components) == 1:
+        components = components[0].split('_')
     if shrink_keep:
         return ''.join([x[0:shrink_keep].title() if len(x) > shrink_keep else x
                         for x in components[:-1]]) + components[-1].title()
