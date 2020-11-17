@@ -124,48 +124,6 @@ def sweep(param_choices, num_sample=None):
     return params
 
 
-def maybe_mkdir(dirname):
-    if not os.path.exists(dirname):
-        os.makedirs(dirname, exist_ok=True)
-    return dirname
-
-
-def parse_yaml(filename):
-    with open(filename) as fin:
-        docs = list(yaml.load_all(fin, Loader=yaml.FullLoader))
-    assert len(docs) > 1
-    config = docs[0]
-    for field in ["commands", "remaps", "dirs"]:
-        assert field in config, "Invalid yaml format: '{}' should be in the first doc.".format(field)
-
-    commands = config["commands"]
-    assert isinstance(commands, dict), "Invalid yaml format: 'commands' should be a dict."
-    for key, value in commands.items():
-        commands[key] = ' '.join(value.strip().split())
-
-    remaps = config["remaps"]
-    if remaps:
-        for key, value in remaps.items():
-            assert isinstance(value, (list, dict)), \
-                "Invalid yaml format: '{}' in 'remaps' should be a list or dict.".format(field)
-
-    dirs = config["dirs"]
-    if dirs:
-        assert isinstance(dirs, dict), "Invalid yaml format: 'dirs' should be a dict."
-
-    escapes = config["escapes"]
-    if escapes:
-        assert isinstance(escapes, list), "Invalid yaml format: 'escapes' should be a list."
-
-    resources = config["resources"]
-    assert isinstance(resources, list), \
-        "Invalid yaml format: 'resources' should be a list of strings."
-
-    choices = docs[1:]
-    assert len(choices) > 0, "Invalid yaml format: no param choices available."
-    return commands, remaps, dirs, escapes, resources, choices
-
-
 def remap_param_dict(param_dict, remaps):
     if not remaps:
         return copy.deepcopy(param_dict)
@@ -187,7 +145,42 @@ def remap_param_dict(param_dict, remaps):
     return new_param_dict
 
 
-def build_tasks(base_commands, remaps, dirs, escapes, choices, output, run=None, first=False, sample=None):
+def build_tasks(filename, output, run=None, first=False, sample=None):
+    # parse yaml file
+    with open(filename) as fin:
+        docs = list(yaml.load_all(fin, Loader=yaml.FullLoader))
+    assert len(docs) > 1
+    config = docs[0]
+    for field in ["commands", "remaps", "dirs"]:
+        assert field in config, "Invalid yaml format: '{}' should be in the first doc.".format(field)
+
+    base_commands = config["commands"]
+    assert isinstance(base_commands, dict), "Invalid yaml format: 'commands' should be a dict."
+    for key, value in base_commands.items():
+        base_commands[key] = ' '.join(value.strip().split())
+
+    remaps = config["remaps"]
+    if remaps:
+        for key, value in remaps.items():
+            assert isinstance(value, (list, dict)), \
+                "Invalid yaml format: '{}' in 'remaps' should be a list or dict.".format(field)
+
+    dirs = config["dirs"]
+    if dirs:
+        assert isinstance(dirs, dict), "Invalid yaml format: 'dirs' should be a dict."
+
+    escapes = config["escapes"]
+    if escapes:
+        assert isinstance(escapes, list), "Invalid yaml format: 'escapes' should be a list."
+
+    resources = config["resources"]
+    assert isinstance(resources, list), \
+        "Invalid yaml format: 'resources' should be a list of strings."
+
+    choices = docs[1:]
+    assert len(choices) > 0, "Invalid yaml format: no param choices available."
+
+    # build tasks
     param_dicts = []
     for choice in choices:
         param_dicts.extend(sweep(choice, num_sample=sample))
@@ -200,7 +193,7 @@ def build_tasks(base_commands, remaps, dirs, escapes, choices, output, run=None,
         # assign directories params to param_dict
         if dirs:
             for key, value in dirs.items():
-                param_dict[key] = maybe_mkdir(os.path.join(base_dir, value))
+                param_dict[key] = os.makedirs(os.path.join(base_dir, value), exist_ok=True)
         if escapes:
             for key in escapes:
                 if key in param_dict:
@@ -218,7 +211,7 @@ def build_tasks(base_commands, remaps, dirs, escapes, choices, output, run=None,
         tasks.append((name, commands))
         if first:
             break
-    return tasks
+    return resources, tasks
 
 
 async def build_worker(task_queue, succeeded_names, failed_names, resource):
@@ -282,10 +275,8 @@ def tune():
     parser.add_argument("-s", "--sample", default=None, type=int,
                         help="Number of random samples from each parameter choice. All combinations are ran by default.")
     args = parser.parse_args()
-    base_commands, remaps, dirs, escapes, resources, choices = parse_yaml(args.config)
-    tasks = build_tasks(base_commands, remaps, dirs, escapes,
-                        choices, args.output, run=args.run, first=args.first, sample=args.sample)
 
+    resources, tasks = build_tasks(args.config, args.output, run=args.run, first=args.first, sample=args.sample)
     if resources and len(resources[0].split(',')) > 1 and args.first:
         resources = sort_single_gpus(resources)
     loop = asyncio.get_event_loop()
