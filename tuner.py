@@ -153,13 +153,17 @@ def parse_yaml(filename):
     if dirs:
         assert isinstance(dirs, dict), "Invalid yaml format: 'dirs' should be a dict."
 
+    escapes = config["escapes"]
+    if escapes:
+        assert isinstance(escapes, list), "Invalid yaml format: 'escapes' should be a list."
+
     resources = config["resources"]
     assert isinstance(resources, list), \
         "Invalid yaml format: 'resources' should be a list of strings."
 
     choices = docs[1:]
     assert len(choices) > 0, "Invalid yaml format: no param choices available."
-    return commands, remaps, dirs, resources, choices
+    return commands, remaps, dirs, escapes, resources, choices
 
 
 def remap_param_dict(param_dict, remaps):
@@ -183,7 +187,7 @@ def remap_param_dict(param_dict, remaps):
     return new_param_dict
 
 
-def build_tasks(base_commands, remaps, dirs, choices, output, run=None, first=False, sample=None):
+def build_tasks(base_commands, remaps, dirs, escapes, choices, output, run=None, first=False, sample=None):
     param_dicts = []
     for choice in choices:
         param_dicts.extend(sweep(choice, num_sample=sample))
@@ -197,7 +201,10 @@ def build_tasks(base_commands, remaps, dirs, choices, output, run=None, first=Fa
         if dirs:
             for key, value in dirs.items():
                 param_dict[key] = maybe_mkdir(os.path.join(base_dir, value))
-
+        if escapes:
+            for key in escapes:
+                if key in param_dict:
+                    del param_dict[key]
         # build execution commands
         commands = {}
         for key, value in base_commands.items():
@@ -275,8 +282,8 @@ def tune():
     parser.add_argument("-s", "--sample", default=None, type=int,
                         help="Number of random samples from each parameter choice. All combinations are ran by default.")
     args = parser.parse_args()
-    base_commands, remaps, dirs, resources, choices = parse_yaml(args.config)
-    tasks = build_tasks(base_commands, remaps, dirs,
+    base_commands, remaps, dirs, escapes, resources, choices = parse_yaml(args.config)
+    tasks = build_tasks(base_commands, remaps, dirs, escapes,
                         choices, args.output, run=args.run, first=args.first, sample=args.sample)
 
     if resources and len(resources[0].split(',')) > 1 and args.first:

@@ -22,6 +22,11 @@ dirs:
   tensorboard-logdir: ""
   save-dir: ""
 
+# delete parameters from final command line
+# these parameters are used only for naming.
+escapes: [ name ]
+
+
 # gpu indices to be filled in CUDA_VISIBLE_DEVICES={}. each resource is assigned to a worker.
 # for multi-gpu tasks, simply set [ "1,2", "3,4" ]
 # a single resource can be assigned multiple times, typically when your task requires a very low gpu utilization
@@ -30,11 +35,14 @@ resources: [ "1", "2", "3" ]
 
 # list all possible choices here, tune.py will sweep all possible combinations.
 ---
-# parameter choices 1
+name: [ baseline ]
+
+---
+# parameter choices 2
 arch: [ preln, postln ]
 ffn-dim: [ 666, 555, 333 ]
 
 ---
-# parameter choices 2
+# parameter choices 3
 arch: [ preln, postln ]
 ffn-dim: [ 768, 584 ]
