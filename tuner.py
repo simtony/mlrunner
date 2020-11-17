@@ -141,7 +141,7 @@ def parse_yaml(filename):
     commands = config["commands"]
     assert isinstance(commands, dict), "Invalid yaml format: 'commands' should be a dict."
     for key, value in commands.items():
-        commands[key] = value.strip()
+        commands[key] = ' '.join(value.strip().split())
 
     remaps = config["remaps"]
     if remaps:
