@@ -145,7 +145,7 @@ def remap_param_dict(param_dict, remaps):
     return new_param_dict
 
 
-def build_tasks(filename, output, run=None, first=False, sample=None):
+def build_tasks(filename, output, run=None, first=False, sample=None, quiet=False):
     # parse yaml file
     with open(filename) as fin:
         docs = list(yaml.load_all(fin, Loader=yaml.FullLoader))
@@ -194,6 +194,9 @@ def build_tasks(filename, output, run=None, first=False, sample=None):
         if dirs:
             for key, value in dirs.items():
                 param_dict[key] = os.makedirs(os.path.join(base_dir, value), exist_ok=True)
+        elif not quiet:
+            os.makedirs(base_dir, exist_ok=True)
+
         if escapes:
             for key in escapes:
                 if key in param_dict:
@@ -204,8 +207,11 @@ def build_tasks(filename, output, run=None, first=False, sample=None):
             if run is not None and run != key:
                 continue
             # direct logs to shell when only one task is running
-            suffix = "| tee {}.log".format(os.path.join(base_dir, key)) if first else "> {}.log".format(
-                    os.path.join(base_dir, key))
+            if quiet:
+                suffix = "> /dev/null"
+            else:
+                suffix = "| tee {}.log".format(os.path.join(base_dir, key)) if first else "> {}.log".format(
+                        os.path.join(base_dir, key))
             commands[key] = " ".join([value, param_dict2command_args(param_dict, bool_as_flag=True), suffix])
         assert commands, "run={} is not in valid commands {}".format(run, tuple(base_commands.keys()))
         tasks.append((name, commands))
@@ -274,9 +280,12 @@ def tune():
                         help="Choose which command to run. All commands are ran by default.")
     parser.add_argument("-s", "--sample", default=None, type=int,
                         help="Number of random samples from each parameter choice. All combinations are ran by default.")
+    parser.add_argument("-q", "--quiet", default=False, action="store_true",
+                        help="Direct logs to dev/null. If no dirs specify, no root output dir will be created.")
     args = parser.parse_args()
 
-    resources, tasks = build_tasks(args.config, args.output, run=args.run, first=args.first, sample=args.sample)
+    resources, tasks = build_tasks(args.config, args.output, run=args.run, first=args.first, sample=args.sample,
+                                   quiet=args.quiet)
     if resources and len(resources[0].split(',')) > 1 and args.first:
         resources = sort_single_gpus(resources)
     loop = asyncio.get_event_loop()
