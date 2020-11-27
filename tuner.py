@@ -169,9 +169,12 @@ def build_tasks(filename, output, run=None, first=False, sample=None, quiet=Fals
     if dirs:
         assert isinstance(dirs, dict), "Invalid yaml format: 'dirs' should be a dict."
 
-    escapes = config["escapes"]
-    if escapes:
-        assert isinstance(escapes, list), "Invalid yaml format: 'escapes' should be a list."
+    if "escapes" in config:
+        escapes = config["escapes"]
+        if escapes:
+            assert isinstance(escapes, list), "Invalid yaml format: 'escapes' should be a list."
+    else:
+        escapes = []
 
     resources = config["resources"]
     assert isinstance(resources, list), \
@@ -208,9 +211,9 @@ def build_tasks(filename, output, run=None, first=False, sample=None, quiet=Fals
                 continue
             # direct logs to shell when only one task is running
             if quiet:
-                suffix = "> /dev/null"
+                suffix = "2>&1 > /dev/null"
             else:
-                suffix = "| tee {}.log".format(os.path.join(base_dir, key)) if first else "> {}.log".format(
+                suffix = "2>&1 | tee {}.log".format(os.path.join(base_dir, key)) if first else "2>&1 > {}.log".format(
                         os.path.join(base_dir, key))
             commands[key] = " ".join([value, param_dict2command_args(param_dict, bool_as_flag=True), suffix])
         assert commands, "run={} is not in valid commands {}".format(run, tuple(base_commands.keys()))
