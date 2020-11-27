@@ -196,7 +196,8 @@ def build_tasks(filename, output, run=None, first=False, sample=None, quiet=Fals
         # assign directories params to param_dict
         if dirs:
             for key, value in dirs.items():
-                param_dict[key] = os.makedirs(os.path.join(base_dir, value), exist_ok=True)
+                param_dict[key] = os.path.join(base_dir, value)
+                os.makedirs(param_dict[key], exist_ok=True)
         elif not quiet:
             os.makedirs(base_dir, exist_ok=True)
 
