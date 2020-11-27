@@ -211,9 +211,9 @@ def build_tasks(filename, output, run=None, first=False, sample=None, quiet=Fals
                 continue
             # direct logs to shell when only one task is running
             if quiet:
-                suffix = "2>&1 > /dev/null"
+                suffix = "&> /dev/null"
             else:
-                suffix = "2>&1 | tee {}.log".format(os.path.join(base_dir, key)) if first else "2>&1 > {}.log".format(
+                suffix = "2>&1 | tee {}.log".format(os.path.join(base_dir, key)) if first else "&> {}.log".format(
                         os.path.join(base_dir, key))
             commands[key] = " ".join([value, param_dict2command_args(param_dict, bool_as_flag=True), suffix])
         assert commands, "run={} is not in valid commands {}".format(run, tuple(base_commands.keys()))
