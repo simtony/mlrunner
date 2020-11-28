@@ -3,7 +3,7 @@
 # base commands. extra commands will be added as suffix, shell environment(typically gpu) will be added as prefix
 commands:
   train: >
-    echo python train.py
+    echo python train.py [[temp]]
   test: >
     echo python test.py
 
@@ -26,6 +26,8 @@ dirs:
 # these parameters are used only for naming.
 escapes: [ name ]
 
+# replace parameters from placeholder(surrounded by two brackets) specified in the command, e.g. [[temp]]
+replaces: [ temp ]
 
 # gpu indices to be filled in CUDA_VISIBLE_DEVICES={}. each resource is assigned to a worker.
 # for multi-gpu tasks, simply set [ "1,2", "3,4" ]
@@ -34,15 +36,19 @@ escapes: [ name ]
 resources: [ "1", "2", "3" ]
 
 # list all possible choices here, tune.py will sweep all possible combinations.
----
-name: [ baseline ]
 
 ---
 # parameter choices 2
+temp: [ hahaha ]
 arch: [ preln, postln ]
 ffn-dim: [ 666, 555, 333 ]
 
 ---
 # parameter choices 3
+temp: [ 3 ]
 arch: [ preln, postln ]
 ffn-dim: [ 768, 584 ]
+
+---
+temp: [ lalala ]
+name: [ baseline ]

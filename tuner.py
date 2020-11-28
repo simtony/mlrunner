@@ -8,102 +8,8 @@ import itertools
 import re
 import os
 import traceback
-
-
-# GPU sorting
-def query_gpus():
-    query_args = ['index', 'gpu_name', 'memory.free', 'memory.used', 'memory.total', 'utilization.gpu']
-    cmd = 'nvidia-smi --query-gpu={} --format=csv,noheader'.format(','.join(query_args))
-
-    def parse(key, value):
-        if key in ['memory.free', 'memory.total', 'memory.used']:
-            return int(value.upper().strip().replace('MIB', ''))
-        elif key == 'utilization.gpu':
-            return int(value.replace('%', '').strip())
-        else:
-            return value.strip()
-
-    gpu_infos = {}
-    for info in os.popen(cmd).readlines():
-        info_dict = {key: parse(key, value)
-                     for key, value in zip(query_args, info.strip().split(','))}
-        index = info_dict['index']
-        del (info_dict['index'])
-        gpu_infos[index] = info_dict
-    return gpu_infos
-
-
-def sort_single_gpus(gpus, min_mem=None):
-    gpus = list(set(gpus))
-    gpu_infos = query_gpus()
-    if min_mem is not None:
-        valid_gpus = [(gpu_infos[gpu]["memory.free"], gpu) for gpu in gpus if
-                      gpu_infos[gpu]["memory.free"] > min_mem]
-        if not valid_gpus:
-            raise ValueError("No GPU with expected memory {} MB.".format(min_mem))
-
-    # fuzzy cmp
-    if min_mem is not None:
-        gpus.sort(key=lambda x: (not gpu_infos[x]["memory.free"] > min_mem, gpu_infos[x]['utilization.gpu'] // 4))
-    else:
-        gpus.sort(key=lambda x: (gpu_infos[x]["memory.used"] // 100, gpu_infos[x]['utilization.gpu'] // 4))
-    return gpus
-
-
-def param_dict2command_args(param, bool_as_flag=True):
-    args = []
-    flags = []
-    for key, value in param.items():
-        if bool_as_flag and isinstance(value, bool):
-            if value:
-                flags.append('--{}'.format(key))
-        else:
-            args.append('--{} {}'.format(key, value))
-    return ' ' + ' '.join(flags + args)
-
-
-def snake2camel(snake_str, shrink_keep=0):
-    """
-    "a_snake_case_string" to "ASnakeCaseString"
-    if shrink_keep > 0, say shrink_keep = 2
-    "a_snake_case_string" to "ASnCaString"
-    """
-    components = snake_str.split('-')
-    if len(components) == 1:
-        components = components[0].split('_')
-    if shrink_keep:
-        return ''.join([x[0:shrink_keep].title() if len(x) > shrink_keep else x
-                        for x in components[:-1]]) + components[-1].title()
-    else:
-        return ''.join(x.title() for x in components)
-
-
-def entry2str(name, value, str_maxlen):
-    name = snake2camel(name, shrink_keep=2)
-    if isinstance(value, str):
-        if len(value) > str_maxlen:
-            value = value[-str_maxlen:]
-        # avoid directory split when used as directory name
-        value = re.sub("^[/.]*", "", value)
-        value = re.sub("/", "_", value)
-    elif isinstance(value, bool):
-        if value:
-            value = "T"
-        else:
-            value = "F"
-    elif isinstance(value, (float, int)):
-        value = "%g" % value
-    else:
-        value = str(value)
-    return name + '=' + value
-
-
-def param_dict2name(param, str_maxlen):
-    keys = list(param.keys())
-    keys.sort()
-    strs = [entry2str(key, value, str_maxlen) for key, value in param.items()]
-    name = ','.join(strs)
-    return name
+from datetime import datetime
+from utils import param_dict2name, param_dict2command_args
 
 
 def sweep(param_choices, num_sample=None):
@@ -145,43 +51,66 @@ def remap_param_dict(param_dict, remaps):
     return new_param_dict
 
 
-def build_tasks(filename, output, run=None, first=False, sample=None, quiet=False):
+def build_tasks(filename, output, command=None, debug=False, sample=None, no_param_dir=False):
     # parse yaml file
     with open(filename) as fin:
         docs = list(yaml.load_all(fin, Loader=yaml.FullLoader))
-    assert len(docs) > 1
+    assert len(docs) > 1, "Empty yaml file."
     config = docs[0]
-    for field in ["commands", "remaps", "dirs"]:
-        assert field in config, "Invalid yaml format: '{}' should be in the first doc.".format(field)
 
-    base_commands = config["commands"]
-    assert isinstance(base_commands, dict), "Invalid yaml format: 'commands' should be a dict."
+    def safe_load(key, data_type, required=False):
+        value = data_type()
+        if required:
+            assert key in config, "Invalid yaml format: '{}' should be in the first doc.".format(key)
+        if key in config:
+            value = config[key]
+            if value:
+                assert isinstance(value, data_type), \
+                    "Invalid yaml format: '{}' should be a {}.".format(key, data_type)
+        return value
+
+    base_commands = safe_load("commands", dict, required=True)
+    assert base_commands, "No commands."
+    if command:
+        assert command in base_commands, \
+            "command={} is not in valid commands {}".format(command, tuple(base_commands.keys()))
+    resources = safe_load("resources", list, required=True)
+    resources = [str(i) for i in resources]
+    remaps = safe_load("remaps", dict)
+    dirs = safe_load("dirs", dict)
+    escapes = safe_load("escapes", list)
+    replaces = safe_load("replaces", list)
+
+    if replaces:
+        for s in replaces:
+            assert isinstance(s, str), "Replace placeholder should be {}, but get {}.".format(str, type(s))
+
+    # avoid unspecified replacement in commands
+    for key, value in base_commands.items():
+        to_replaces = set(re.findall("(?<=\[\[).*?(?=\]\])", value))
+        if replaces:
+            to_replaces = to_replaces - set(replaces)
+        to_replaces = list(to_replaces)
+        assert not to_replaces, \
+            "Replace placeholders '{}' in command '{}' not specified in 'replaces' list.".format(to_replaces, key)
+
     for key, value in base_commands.items():
         base_commands[key] = ' '.join(value.strip().split())
 
-    remaps = config["remaps"]
     if remaps:
         for key, value in remaps.items():
             assert isinstance(value, (list, dict)), \
-                "Invalid yaml format: '{}' in 'remaps' should be a list or dict.".format(field)
-
-    dirs = config["dirs"]
-    if dirs:
-        assert isinstance(dirs, dict), "Invalid yaml format: 'dirs' should be a dict."
-
-    if "escapes" in config:
-        escapes = config["escapes"]
-        if escapes:
-            assert isinstance(escapes, list), "Invalid yaml format: 'escapes' should be a list."
-    else:
-        escapes = []
-
-    resources = config["resources"]
-    assert isinstance(resources, list), \
-        "Invalid yaml format: 'resources' should be a list of strings."
+                "Invalid yaml format: '{}' in 'remaps' should be a list or dict.".format(key)
 
     choices = docs[1:]
     assert len(choices) > 0, "Invalid yaml format: no param choices available."
+
+    # avoid unspecified replacement values in param choices.
+    if replaces:
+        for s in replaces:
+            for i, choice in enumerate(choices):
+                assert s in choice, "Replacement '{}' not in {}th choice: {}".format(s, i, choice)
+                assert choice[s], "Replacement '{}' in {}th choice is empty: {}".format(s, i, choice)
 
     # build tasks
     param_dicts = []
@@ -191,35 +120,49 @@ def build_tasks(filename, output, run=None, first=False, sample=None, quiet=Fals
     tasks = []
     for param_dict in param_dicts:
         name = param_dict2name(param_dict, str_maxlen=100)
-        base_dir = os.path.join(output, name)
+        if no_param_dir:
+            output_dir = output
+        else:
+            output_dir = os.path.join(output, name)
+        os.makedirs(output_dir, exist_ok=True)
         param_dict = remap_param_dict(param_dict, remaps)
         # assign directories params to param_dict
         if dirs:
             for key, value in dirs.items():
-                param_dict[key] = os.path.join(base_dir, value)
+                param_dict[key] = os.path.join(output_dir, value)
                 os.makedirs(param_dict[key], exist_ok=True)
-        elif not quiet:
-            os.makedirs(base_dir, exist_ok=True)
-
         if escapes:
             for key in escapes:
                 if key in param_dict:
                     del param_dict[key]
+
+        replace_pairs = []
+        if replaces:
+            for key in replaces:
+                if key in param_dict:
+                    pattern = re.compile("\[\[{}\]\]".format(key))
+                    replace_pairs.append((pattern, str(param_dict[key])))
+                    del param_dict[key]
+
         # build execution commands
         commands = {}
         for key, value in base_commands.items():
-            if run is not None and run != key:
+            log_filename = "{}.log.{}.{}".format(os.path.join(output_dir, key),
+                                                 datetime.now().strftime("%Y-%m-%d.%H:%M:%S"),
+                                                 name)
+            if command is not None and command != key:
                 continue
             # direct logs to shell when only one task is running
-            if quiet:
-                suffix = "&> /dev/null"
+            if debug:
+                suffix = "2>&1 | tee {}".format(log_filename)
             else:
-                suffix = "2>&1 | tee {}.log".format(os.path.join(base_dir, key)) if first else "&> {}.log".format(
-                        os.path.join(base_dir, key))
+                suffix = "&> {}".format(log_filename)
             commands[key] = " ".join([value, param_dict2command_args(param_dict, bool_as_flag=True), suffix])
-        assert commands, "run={} is not in valid commands {}".format(run, tuple(base_commands.keys()))
+            for pattern, target in replace_pairs:
+                commands[key] = pattern.sub(target, commands[key])
         tasks.append((name, commands))
-        if first:
+        if debug:
+            print("Enter debug mode. Only the first task will be ran.")
             break
     return resources, tasks
 
@@ -231,8 +174,8 @@ async def build_worker(task_queue, succeeded_names, failed_names, resource):
         for key, command in commands.items():
             commands[key] = " ".join([prefix, command])
         try:
-
             for key, command in commands.items():
+                # TODO automatically sleep when resource limit not met
                 process = await asyncio.create_subprocess_shell(command)
                 print("Start task: {}-{}, gpu: {}, pid: {}, param: {}".format(index, key, resource, process.pid, name))
                 await process.wait()
@@ -276,21 +219,25 @@ async def run_all(tasks, resources):
 
 def tune():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-o", "--output", default="output", help="Root dir for output of experiments.")
-    parser.add_argument("-c", "--config", default="params.yaml", help="Config file for present experiment group.")
-    parser.add_argument("-f", "--first", default=False, action='store_true',
-                        help="Used for debug, only run the first task, logging information will be redirected to stdout.")
-    parser.add_argument("-r", "--run", default=None, type=str,
+    parser.add_argument("-o", "--output", default="output", help="Output directory of all experiments.")
+    parser.add_argument("-c", "--config", default="params.yaml",
+                        help="Yaml configuration file for present experiment group.")
+    parser.add_argument("-d", "--debug", default=False, action='store_true',
+                        help="Debug mode. Only run the first task, log will be directed to stdout.")
+    parser.add_argument("--command", default=None, type=str,
                         help="Choose which command to run. All commands are ran by default.")
-    parser.add_argument("-s", "--sample", default=None, type=int,
-                        help="Number of random samples from each parameter choice. All combinations are ran by default.")
-    parser.add_argument("-q", "--quiet", default=False, action="store_true",
-                        help="Direct logs to dev/null. If no dirs specify, no root output dir will be created.")
+    parser.add_argument("--sample", default=None, type=int,
+                        help="Number of random samples from each param choice. All combinations are ran by default.")
+    parser.add_argument("--no-param-dir", default=False, action="store_true",
+                        help="Do not create separated output directory for each param choice.")
+
     args = parser.parse_args()
 
-    resources, tasks = build_tasks(args.config, args.output, run=args.run, first=args.first, sample=args.sample,
-                                   quiet=args.quiet)
-    if resources and len(resources[0].split(',')) > 1 and args.first:
-        resources = sort_single_gpus(resources)
+    resources, tasks = build_tasks(filename=args.config,
+                                   output=args.output,
+                                   command=args.command,
+                                   debug=args.debug,
+                                   sample=args.sample,
+                                   no_param_dir=args.no_param_dir)
     loop = asyncio.get_event_loop()
     loop.run_until_complete(run_all(tasks, resources))
