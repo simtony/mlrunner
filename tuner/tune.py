@@ -9,7 +9,7 @@ import re
 import os
 import traceback
 from datetime import datetime
-from utils import param_dict2name, param_dict2command_args
+from tuner.utils import param_dict2name, param_dict2command_args
 
 
 def sweep(param_choices, num_sample=None):
@@ -104,13 +104,6 @@ def build_tasks(filename, output, command=None, debug=False, sample=None, no_par
 
     choices = docs[1:]
     assert len(choices) > 0, "Invalid yaml format: no param choices available."
-
-    # avoid unspecified replacement values in param choices.
-    if replaces:
-        for s in replaces:
-            for i, choice in enumerate(choices):
-                assert s in choice, "Replacement '{}' not in {}th choice: {}".format(s, i, choice)
-                assert choice[s], "Replacement '{}' in {}th choice is empty: {}".format(s, i, choice)
 
     # build tasks
     param_dicts = []
@@ -217,7 +210,7 @@ async def run_all(tasks, resources):
             print('    %s \\' % name)
 
 
-def tune():
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-o", "--output", default="output", help="Output directory of all experiments.")
     parser.add_argument("-c", "--config", default="params.yaml",

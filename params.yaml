@@ -35,7 +35,7 @@ replaces: [ temp ]
 # [ "1", "2", "3", "1", "2", "3" ]
 resources: [ "1", "2", "3" ]
 
-# list all possible choices here, tune.py will sweep all possible combinations.
+# list all possible choices here, model_tuner.py will sweep all possible combinations.
 
 ---
 # parameter choices 2
