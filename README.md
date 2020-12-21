@@ -29,10 +29,6 @@ Install from source:
 git pull https://github.com/simtony/model_tuner
 cd model_tuner && python3 setup.py install
 ```
-Install from pip:
-```
-pip install model_tuner
-```
 
 # Usage
 Edit the yaml file. Then run
