@@ -76,14 +76,18 @@ def snake2camel(snake_str, shrink_keep=0):
         return ''.join(x.title() for x in components)
 
 
-def entry2str(name, value, str_maxlen):
+def entry2str(name, value, str_maxlen, no_shrink_dir=False):
     name = snake2camel(name, shrink_keep=2)
     if isinstance(value, str):
+        if os.path.exists(value) and not no_shrink_dir:
+            value = os.path.basename(value)
+        else:
+            # avoid directory split when used as directory name
+            value = re.sub("^[/.]*", "", value)
+            value = re.sub("/", "_", value)
         if len(value) > str_maxlen:
             value = value[-str_maxlen:]
-        # avoid directory split when used as directory name
-        value = re.sub("^[/.]*", "", value)
-        value = re.sub("/", "_", value)
+
     elif isinstance(value, bool):
         if value:
             value = "T"
@@ -96,10 +100,10 @@ def entry2str(name, value, str_maxlen):
     return name + '=' + value
 
 
-def param_dict2name(param, str_maxlen):
+def param_dict2name(param, str_maxlen, no_shrink_dir=False):
     keys = list(param.keys())
     keys.sort()
-    strs = [entry2str(key, value, str_maxlen) for key, value in param.items()]
+    strs = [entry2str(key, value, str_maxlen, no_shrink_dir) for key, value in param.items()]
     name = ','.join(strs)
     return name
 

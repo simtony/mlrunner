@@ -88,7 +88,7 @@ def build_tasks(args):
         for key, value in defaults.items():
             if key not in param_dict:
                 param_dict[key] = value
-        name = param_dict2name(param_dict, str_maxlen=100)
+        name = param_dict2name(param_dict, str_maxlen=100, no_shrink_dir=args.no_shrink_dir)
         param_dict["_name"] = name
         if args.no_param_dir:
             param_dict["_output"] = args.output
@@ -213,6 +213,9 @@ def main():
                         help="Number of random samples from each param choice. All combinations are ran by default.")
     parser.add_argument("--no-param-dir", default=False, action="store_true",
                         help="Do not create separated output directory for each param choice.")
+    parser.add_argument("--no-shrink-dir", default=False, action="store_true",
+                        help="Do not eliminate directory of directory params.")
+
     args = parser.parse_args()
     resources, tasks = build_tasks(args)
     os.makedirs(args.output, exist_ok=True)
