@@ -105,13 +105,13 @@ def param_dict2name(param, str_maxlen):
 
 
 # dict to command line options
-def param_dict2command_args(param, bool_as_flag=True):
+def param_dict2command_args(param_dict, bool_as_flag=True):
     args = []
     flags = []
-    for key, value in param.items():
+    for key, value in param_dict.items():
         if bool_as_flag and isinstance(value, bool):
             if value:
                 flags.append('--{}'.format(key))
         else:
             args.append('--{} {}'.format(key, value))
-    return ' ' + ' '.join(flags + args)
+    return ' ' + ' '.join(flags + args) + ' '

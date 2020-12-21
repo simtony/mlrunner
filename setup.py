@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
         name='model_tuner',
-        version='0.1',
+        version='0.2',
         author='Tony Ou',
         author_email='simtony2@gmail.com',
         url='https://github.com/simtony/tuner',

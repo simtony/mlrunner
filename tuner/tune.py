@@ -2,58 +2,37 @@
 import asyncio
 import argparse
 import yaml
-import copy
 import random
 import itertools
 import re
 import os
 import traceback
+import json
+import shutil
 from datetime import datetime
 from tuner.utils import param_dict2name, param_dict2command_args
 
 
-def sweep(param_choices, num_sample=None):
+def sweep(param2choices, num_sample=None):
     # random combination of param choices
-    for key, values in param_choices.items():
+    for key, values in param2choices.items():
         assert isinstance(values, list), "{} should be a list, not {}".format(key, type(values))
 
-    param_lists = [[(key, value) for value in values] for key, values in param_choices.items()]
-    cand_params = [list(param) for param in itertools.product(*param_lists)]
+    param_choices = [[(key, value) for value in values] for key, values in param2choices.items()]
+    cand_params = [list(param) for param in itertools.product(*param_choices)]
     if num_sample is not None:
         random.shuffle(cand_params)
         params = cand_params[:num_sample]
         params.sort()
     else:
         params = cand_params
-    params = [dict(param) for param in params]
-    print("Choose %d out of %d possible choices." % (len(params), len(cand_params)))
-    return params
+    param_dicts = [dict(param) for param in params]
+    return param_dicts
 
 
-def remap_param_dict(param_dict, remaps):
-    if not remaps:
-        return copy.deepcopy(param_dict)
-
-    new_param_dict = {}
-    for key, value in param_dict.items():
-        if key in remaps:
-            if isinstance(remaps[key], list):
-                # param replacement
-                for new_key in remaps[key]:
-                    new_param_dict[new_key] = value
-            if isinstance(remaps[key], dict):
-                # param remap
-                assert value in remaps[key], \
-                    "value of '{}' should be in {}".format(key, tuple(remaps[key].keys()))
-                new_param_dict.update(remaps[key][value])
-        else:
-            new_param_dict[key] = value
-    return new_param_dict
-
-
-def build_tasks(filename, output, command=None, debug=False, sample=None, no_param_dir=False):
+def build_tasks(args):
     # parse yaml file
-    with open(filename) as fin:
+    with open(args.config) as fin:
         docs = list(yaml.load_all(fin, Loader=yaml.FullLoader))
     assert len(docs) > 1, "Empty yaml file."
     config = docs[0]
@@ -69,117 +48,127 @@ def build_tasks(filename, output, command=None, debug=False, sample=None, no_par
                     "Invalid yaml format: '{}' should be a {}.".format(key, data_type)
         return value
 
-    base_commands = safe_load("commands", dict, required=True)
-    assert base_commands, "No commands."
-    if command:
-        assert command in base_commands, \
-            "command={} is not in valid commands {}".format(command, tuple(base_commands.keys()))
-    resources = safe_load("resources", list, required=True)
-    resources = [str(i) for i in resources]
-    remaps = safe_load("remaps", dict)
-    dirs = safe_load("dirs", dict)
-    escapes = safe_load("escapes", list)
-    replaces = safe_load("replaces", list)
-
-    if replaces:
-        for s in replaces:
-            assert isinstance(s, str), "Replace placeholder should be {}, but get {}.".format(str, type(s))
-
-    # avoid unspecified replacement in commands
-    for key, value in base_commands.items():
-        to_replaces = set(re.findall("(?<=\[\[).*?(?=\]\])", value))
-        if replaces:
-            to_replaces = to_replaces - set(replaces)
-        to_replaces = list(to_replaces)
-        assert not to_replaces, \
-            "Replace placeholders '{}' in command '{}' not specified in 'replaces' list.".format(to_replaces, key)
-
-    for key, value in base_commands.items():
-        base_commands[key] = ' '.join(value.strip().split())
-
-    if remaps:
-        for key, value in remaps.items():
+    name2template = safe_load("template", dict, required=True)
+    assert name2template, "No command templates."
+    if args.command:
+        assert args.command in name2template, \
+            "command={} is not in valid commands {}".format(args.command, tuple(name2template.keys()))
+    resources = [str(i) for i in safe_load("resource", list, required=True)]
+    defaults = safe_load("default", dict)
+    aliases = safe_load("alias", dict)
+    if aliases:
+        for key, value in aliases.items():
             assert isinstance(value, (list, dict)), \
-                "Invalid yaml format: '{}' in 'remaps' should be a list or dict.".format(key)
+                "Invalid yaml format: '{}' in 'alias' should be a list or dict.".format(key)
+
+    def safe_alias(key, value):
+        if key in aliases:
+            if isinstance(aliases[key], list):
+                # param replacement
+                return {new_key: value for new_key in aliases[key]}
+            if isinstance(aliases[key], dict):
+                # param remap
+                assert value in aliases[key], \
+                    "value of '{}' should be in {}".format(key, tuple(aliases[key].keys()))
+                return aliases[key][value]
+        else:
+            return {key: value}
 
     choices = docs[1:]
+    if args.param_choices is not None:
+        choices.extend(yaml.load_all(args.param_choices, Loader=yaml.FullLoader))
     assert len(choices) > 0, "Invalid yaml format: no param choices available."
 
-    # build tasks
-    param_dicts = []
-    for choice in choices:
-        param_dicts.extend(sweep(choice, num_sample=sample))
-
+    # build task commands and de-duplication
+    datetime_str = datetime.now().strftime("%Y-%m-%d.%H:%M:%S")
+    name2uniq_commands = {name: set() for name in name2template.keys()}
     tasks = []
-    for param_dict in param_dicts:
+    for param_dict in itertools.chain.from_iterable(sweep(choice, num_sample=args.sample) for choice in choices):
+        # prepare param_dict
+        for key, value in defaults.items():
+            if key not in param_dict:
+                param_dict[key] = value
         name = param_dict2name(param_dict, str_maxlen=100)
-        if no_param_dir:
-            output_dir = output
+        param_dict["_name"] = name
+        if args.no_param_dir:
+            param_dict["_output"] = args.output
         else:
-            output_dir = os.path.join(output, name)
-        os.makedirs(output_dir, exist_ok=True)
-        param_dict = remap_param_dict(param_dict, remaps)
-        # assign directories params to param_dict
-        if dirs:
-            for key, value in dirs.items():
-                param_dict[key] = os.path.join(output_dir, value)
-                os.makedirs(param_dict[key], exist_ok=True)
-        if escapes:
-            for key in escapes:
-                if key in param_dict:
-                    del param_dict[key]
+            param_dict["_output"] = os.path.join(args.output, name)
+        param_dict["_datetime"] = datetime_str
 
-        replace_pairs = []
-        if replaces:
-            for key in replaces:
-                if key in param_dict:
-                    pattern = re.compile("\[\[{}\]\]".format(key))
-                    replace_pairs.append((pattern, str(param_dict[key])))
-                    del param_dict[key]
-
-        # build execution commands
-        commands = {}
-        for key, value in base_commands.items():
-            log_filename = "{}.log.{}.{}".format(os.path.join(output_dir, key),
-                                                 datetime.now().strftime("%Y-%m-%d.%H:%M:%S"),
-                                                 name)
-            if command is not None and command != key:
+        # prepare command
+        name2command = {}
+        duplicate = True
+        for name, command_template in name2template.items():
+            if args.command is not None and args.command != name:
                 continue
-            # direct logs to shell when only one task is running
-            if debug:
-                suffix = "2>&1 | tee {}".format(log_filename)
+            empty_params = []
+            command = command_template
+            for curly_param in re.findall(r"{.+?}", command):
+                param = curly_param.strip("{}")
+                if param in param_dict:
+                    s = str(param_dict[param])
+                    command = command.replace(curly_param, s)
+                else:
+                    empty_params.append(curly_param)
+            for square_param in re.findall(r"\[.+?\]", command):
+                param = square_param.strip("[]")
+                if param in param_dict:
+                    s = param_dict2command_args(safe_alias(param, param_dict[param]), bool_as_flag=True)
+                    command = command.replace(square_param, s)
+                else:
+                    empty_params.append(square_param)
+
+            assert not empty_params, "params {} are not specified in 'default' or 'param_choice'".format(empty_params)
+            command = " ".join(command.split())
+            # check for duplication
+            if command not in name2uniq_commands[name]:
+                duplicate = False
+                name2uniq_commands[name].add(command)
+            name2command[name] = command
+        if duplicate:
+            continue
+
+        # append suffix to commands
+        for name, command in name2command.items():
+            log_file = "log.{}.{}.{}".format(name, param_dict["_datetime"], param_dict["_name"])
+            log_path = os.path.join(param_dict["_output"], log_file)
+            if args.debug:
+                suffix = "2>&1 | tee {}".format(log_path)
             else:
-                suffix = "&> {}".format(log_filename)
-            commands[key] = " ".join([value, param_dict2command_args(param_dict, bool_as_flag=True), suffix])
-            for pattern, target in replace_pairs:
-                commands[key] = pattern.sub(target, commands[key])
-        tasks.append((name, commands))
-        if debug:
-            print("Enter debug mode. Only the first task will be ran.")
-            break
+                suffix = "&> {}".format(log_path)
+            name2command[name] = command + " " + suffix
+        tasks.append((param_dict, name2command))
+
+    if args.debug:
+        tasks = tasks[:1]
     return resources, tasks
 
 
 async def build_worker(task_queue, succeeded_names, failed_names, resource):
     while True:
-        index, (name, commands) = await task_queue.get()
+        index, (param_dict, name2command) = await task_queue.get()
         prefix = "CUDA_VISIBLE_DEVICES={}".format(resource)
-        for key, command in commands.items():
-            commands[key] = " ".join([prefix, command])
+        os.makedirs(param_dict["_output"], exist_ok=True)
+        for key, command in name2command.items():
+            name2command[key] = " ".join([prefix, command])
+        param_dict["_commands"] = name2command
+        with open(os.path.join(param_dict["_output"], "param.json"), "w") as fout:
+            json.dump(param_dict, fout, sort_keys=True, indent=4)
         try:
-            for key, command in commands.items():
-                # TODO automatically sleep when resource limit not met
+            for key, command in name2command.items():
                 process = await asyncio.create_subprocess_shell(command)
-                print("Start task: {}-{}, gpu: {}, pid: {}, param: {}".format(index, key, resource, process.pid, name))
+                print("Start task: {}-{}, gpu: {}, pid: {}, param: {}".format(index, key, resource, process.pid,
+                                                                              param_dict["_name"]))
                 await process.wait()
                 if process.returncode != 0:
                     raise Exception("Exited unexpectedly:\n{}".format(command))
-            succeeded_names.append(name)
+            succeeded_names.append(param_dict["_name"])
         except Exception as e:
             traceback.print_exc()
             print(e)
-            print("Failed task: {}/{}: {}".format(index, task_queue.maxsize, name))
-            failed_names.append(name)
+            print("Failed task: {}/{}: {}".format(index, task_queue.maxsize, param_dict["_name"]))
+            failed_names.append(param_dict["_name"])
         task_queue.task_done()
 
 
@@ -188,8 +177,7 @@ async def run_all(tasks, resources):
     task_queue = asyncio.Queue(maxsize=len(tasks))
     for index, task in enumerate(tasks):
         task_queue.put_nowait((index, task))
-    print("Total: %d" % len(tasks))
-
+    print("Total unique tasks: %d" % len(tasks))
     # build workers that consuming tasks in task_queue asynchronously
     succeeded_names = []
     failed_names = []
@@ -215,6 +203,8 @@ def main():
     parser.add_argument("-o", "--output", default="output", help="Output directory of all experiments.")
     parser.add_argument("-c", "--config", default="params.yaml",
                         help="Yaml configuration file for present experiment group.")
+    parser.add_argument("-p", "--param_choices", default="",
+                        help="Extra param choices specified in string.")
     parser.add_argument("-d", "--debug", default=False, action='store_true',
                         help="Debug mode. Only run the first task, log will be directed to stdout.")
     parser.add_argument("--command", default=None, type=str,
@@ -223,14 +213,9 @@ def main():
                         help="Number of random samples from each param choice. All combinations are ran by default.")
     parser.add_argument("--no-param-dir", default=False, action="store_true",
                         help="Do not create separated output directory for each param choice.")
-
     args = parser.parse_args()
-
-    resources, tasks = build_tasks(filename=args.config,
-                                   output=args.output,
-                                   command=args.command,
-                                   debug=args.debug,
-                                   sample=args.sample,
-                                   no_param_dir=args.no_param_dir)
+    resources, tasks = build_tasks(args)
+    os.makedirs(args.output, exist_ok=True)
+    shutil.copyfile(args.config, os.path.join(args.output, args.config))
     loop = asyncio.get_event_loop()
     loop.run_until_complete(run_all(tasks, resources))
