@@ -45,7 +45,6 @@ resource: [ "1", "2", "3" ]
 # parameter choices 1
 temp: [ tuner/tune.py ]
 arch: [ preln, postln ]
-ffn-dim: [ 666, 555, 333 ]
 
 ---
 # parameter choices 2, duplication of 1. This will be filtered out.

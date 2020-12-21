@@ -85,9 +85,6 @@ def build_tasks(args):
     tasks = []
     for param_dict in itertools.chain.from_iterable(sweep(choice, num_sample=args.sample) for choice in choices):
         # prepare param_dict
-        for key, value in defaults.items():
-            if key not in param_dict:
-                param_dict[key] = value
         name = param_dict2name(param_dict, str_maxlen=100, no_shrink_dir=args.no_shrink_dir)
         param_dict["_name"] = name
         if args.no_param_dir:
@@ -95,6 +92,9 @@ def build_tasks(args):
         else:
             param_dict["_output"] = os.path.join(args.output, name)
         param_dict["_datetime"] = datetime_str
+        for key, value in defaults.items():
+            if key not in param_dict:
+                param_dict[key] = value
 
         # prepare command
         name2command = {}
