@@ -20,7 +20,7 @@ valid in python 3.6.X, which is a standard version for Nvidia NGC containers.
 
 # Dependencies
 ```
-python == 3.6.X
+python >= 3.6.X
 pyyaml
 ```
 # Install

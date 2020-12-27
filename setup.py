@@ -14,7 +14,7 @@ setuptools.setup(
         ],
         install_requires=['pyyaml'],
         packages=setuptools.find_packages(),
-        python_requires='==3.6.*',
+        python_requires='>=3.6.*',
         entry_points={
             'console_scripts': [
                 'tune = tuner.tune:main'
