@@ -5,12 +5,33 @@ import yaml
 import random
 import itertools
 import re
+import types
+import sys
 import os
 import traceback
 import json
 import shutil
 from datetime import datetime
 from tuner.utils import param_dict2name, param_dict2command_args
+
+
+def run(coro):
+    if sys.version_info >= (3, 7):
+        return asyncio.run(coro)
+
+    # Emulate asyncio.run() on older versions
+
+    # asyncio.run() requires a coroutine, so require it here as well
+    if not isinstance(coro, types.CoroutineType):
+        raise TypeError("run() requires a coroutine object")
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
 
 
 def sweep(param2choices, num_sample=None):
@@ -220,5 +241,4 @@ def main():
     resources, tasks = build_tasks(args)
     os.makedirs(args.output, exist_ok=True)
     shutil.copyfile(args.config, os.path.join(args.output, args.config))
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(run_all(tasks, resources))
+    run(run_all(tasks, resources))
