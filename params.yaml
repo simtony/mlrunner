@@ -12,7 +12,7 @@
 # {_datetime}: current date&time
 template:
   train: >
-    echo python train.py {temp} [ffn-dim] [arch] --logdir {_output}
+    sleep {sleep} && echo python train.py {temp} [ffn-dim] [arch] --logdir {_output}
   test: >
     echo python test.py --output_dir {_output}
 
@@ -33,28 +33,31 @@ default:
   temp: data/sdf/sdf/asdf/asdf/asdf/asdfasdf/
   ffn-dim: 222
   arch: preln
+  sleep: 1
 
 # gpu indices to be filled in CUDA_VISIBLE_DEVICES={}. each resource is assigned to a worker.
 # for multi-gpu tasks, simply set [ "1,2", "3,4" ]
 # a single resource can be assigned multiple times, typically when your task requires a very low gpu utilization
 # [ "1", "2", "3", "1", "2", "3" ]
-resource: [ "1", "2", "3" ]
+resource: [ "1", "2" ]
 
 # list all possible choices here, model_tuner.py will sweep all possible combinations.
 ---
 # parameter choices 1
 temp: [ tuner/tune.py ]
 arch: [ preln, postln ]
+sleep: [ 1, 2, 3 ]
+name: [ haha ]
 
 ---
 # parameter choices 2, duplication of 1. This will be filtered out.
 temp: [ hahaha ]
 arch: [ preln, postln ]
 ffn-dim: [ 666, 555, 333 ]
-
----
-# parameter choices 3
-temp: [ 3 ]
-arch: [ preln, postln ]
-ffn-dim: [ 768, 584 ]
+#
+#---
+## parameter choices 3
+#temp: [ 3 ]
+#arch: [ preln, postln ]
+#ffn-dim: [ 768, 584 ]
 

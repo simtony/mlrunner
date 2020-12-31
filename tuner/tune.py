@@ -6,9 +6,9 @@ import random
 import itertools
 import re
 import types
+import copy
 import sys
 import os
-import traceback
 import json
 import shutil
 from datetime import datetime
@@ -102,24 +102,29 @@ def build_tasks(args):
 
     # build task commands and de-duplication
     datetime_str = datetime.now().strftime("%Y-%m-%d.%H:%M:%S")
-    name2uniq_commands = {name: set() for name in name2template.keys()}
+    uniq_param_dicts = []
+    orphan_param_keys = set()
     tasks = []
     for param_dict in itertools.chain.from_iterable(sweep(choice, num_sample=args.sample) for choice in choices):
         # prepare param_dict
         name = param_dict2name(param_dict, str_maxlen=100, no_shrink_dir=args.no_shrink_dir)
+        for key, value in defaults.items():
+            if key not in param_dict:
+                param_dict[key] = value
+        if param_dict in uniq_param_dicts:
+            continue
+        else:
+            uniq_param_dicts.append(copy.deepcopy(param_dict))
+        param_keys = set(param_dict.keys())
         param_dict["_name"] = name
         if args.no_param_dir:
             param_dict["_output"] = args.output
         else:
             param_dict["_output"] = os.path.join(args.output, name)
         param_dict["_datetime"] = datetime_str
-        for key, value in defaults.items():
-            if key not in param_dict:
-                param_dict[key] = value
 
         # prepare command
         name2command = {}
-        duplicate = True
         for name, command_template in name2template.items():
             if args.command is not None and args.command != name:
                 continue
@@ -127,6 +132,8 @@ def build_tasks(args):
             command = command_template
             for curly_param in re.findall(r"{.+?}", command):
                 param = curly_param.strip("{}")
+                if param in param_keys:
+                    param_keys.remove(param)
                 if param in param_dict:
                     s = str(param_dict[param])
                     command = command.replace(curly_param, s)
@@ -134,6 +141,8 @@ def build_tasks(args):
                     empty_params.append(curly_param)
             for square_param in re.findall(r"\[.+?\]", command):
                 param = square_param.strip("[]")
+                if param in param_keys:
+                    param_keys.remove(param)
                 if param in param_dict:
                     s = param_dict2command_args(safe_alias(param, param_dict[param]), bool_as_flag=True)
                     command = command.replace(square_param, s)
@@ -142,14 +151,8 @@ def build_tasks(args):
 
             assert not empty_params, "params {} are not specified in 'default' or 'param_choice'".format(empty_params)
             command = " ".join(command.split())
-            # check for duplication
-            if command not in name2uniq_commands[name]:
-                duplicate = False
-                name2uniq_commands[name].add(command)
             name2command[name] = command
-        if duplicate:
-            continue
-
+        orphan_param_keys.update(param_keys)
         # append suffix to commands
         for name, command in name2command.items():
             log_file = "log.{}.{}.{}".format(name, param_dict["_datetime"], param_dict["_name"])
@@ -160,7 +163,8 @@ def build_tasks(args):
                 suffix = "&> {}".format(log_path)
             name2command[name] = command + " " + suffix
         tasks.append((param_dict, name2command))
-
+    if orphan_param_keys:
+        print("\x1b[31mOrphan params: {}\x1b[0m".format(orphan_param_keys))
     if args.debug:
         tasks = tasks[:1]
     return resources, tasks
@@ -176,20 +180,22 @@ async def build_worker(task_queue, succeeded_names, failed_names, resource):
         param_dict["_commands"] = name2command
         with open(os.path.join(param_dict["_output"], "param.json"), "w") as fout:
             json.dump(param_dict, fout, sort_keys=True, indent=4)
-        try:
-            for key, command in name2command.items():
-                process = await asyncio.create_subprocess_shell(command)
-                print("Start task: {}-{}, gpu: {}, pid: {}, param: {}".format(index, key, resource, process.pid,
-                                                                              param_dict["_name"]))
-                await process.wait()
-                if process.returncode != 0:
-                    raise Exception("Exited unexpectedly:\n{}".format(command))
-            succeeded_names.append(param_dict["_name"])
-        except Exception as e:
-            traceback.print_exc()
-            print(e)
-            print("Failed task: {}/{}: {}".format(index, task_queue.maxsize, param_dict["_name"]))
-            failed_names.append(param_dict["_name"])
+        for key, command in name2command.items():
+            process = await asyncio.create_subprocess_shell(command,
+                                                            stdout=asyncio.subprocess.PIPE,
+                                                            stderr=asyncio.subprocess.PIPE)
+            print("Start task: {}-{}, gpu: {}, pid: {}, param: {}".format(index, key, resource, process.pid,
+                                                                          param_dict["_name"]))
+            stdout, stderr = await process.communicate()
+            if stderr:
+                print("\x1b[31mFailed task: {}/{}: {}\x1b[0m".format(index, task_queue.maxsize, param_dict["_name"]))
+                failed_names.append(param_dict["_name"])
+                if stderr:
+                    print('\x1b[31m{}\x1b[0m'.format(command))
+                    print("\x1b[31m{}\n\x1b[0m".format(stderr.decode().strip()))
+                break
+            else:
+                succeeded_names.append(param_dict["_name"])
         task_queue.task_done()
 
 
