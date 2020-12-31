@@ -97,14 +97,14 @@ def entry2str(name, value, str_maxlen, no_shrink_dir=False):
         value = "%g" % value
     else:
         value = str(value)
-    return name + '=' + value
+    return name + '_' + value
 
 
 def param_dict2name(param, str_maxlen, no_shrink_dir=False):
     keys = list(param.keys())
     keys.sort()
     strs = [entry2str(key, value, str_maxlen, no_shrink_dir) for key, value in param.items()]
-    name = ','.join(strs)
+    name = '-'.join(strs)
     return name
 
 

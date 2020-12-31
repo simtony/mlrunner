@@ -151,20 +151,21 @@ def build_tasks(args):
 
             assert not empty_params, "params {} are not specified in 'default' or 'param_choice'".format(empty_params)
             command = " ".join(command.split())
-            name2command[name] = command
-        orphan_param_keys.update(param_keys)
-        # append suffix to commands
-        for name, command in name2command.items():
-            log_file = "log.{}.{}.{}".format(name, param_dict["_datetime"], param_dict["_name"])
+            if args.no_param_dir:
+                log_file = "log.{}.{}.{}".format(name, param_dict["_datetime"], param_dict["_name"])
+            else:
+                log_file = "log.{}.{}".format(name, param_dict["_datetime"])
             log_path = os.path.join(param_dict["_output"], log_file)
+
             if args.debug:
                 suffix = "2>&1 | tee {}".format(log_path)
             else:
-                suffix = "&> {}".format(log_path)
+                suffix = "> {} 2>&1".format(log_path)
             name2command[name] = command + " " + suffix
+        orphan_param_keys.update(param_keys)
         tasks.append((param_dict, name2command))
     if orphan_param_keys:
-        print("\x1b[31mOrphan params: {}\x1b[0m".format(orphan_param_keys))
+        print("\x1b[32mOrphan params: {}\x1b[0m".format(orphan_param_keys))
     if args.debug:
         tasks = tasks[:1]
     return resources, tasks
@@ -181,21 +182,17 @@ async def build_worker(task_queue, succeeded_names, failed_names, resource):
         with open(os.path.join(param_dict["_output"], "param.json"), "w") as fout:
             json.dump(param_dict, fout, sort_keys=True, indent=4)
         for key, command in name2command.items():
-            process = await asyncio.create_subprocess_shell(command,
-                                                            stdout=asyncio.subprocess.PIPE,
-                                                            stderr=asyncio.subprocess.PIPE)
-            print("Start task: {}-{}, gpu: {}, pid: {}, param: {}".format(index, key, resource, process.pid,
-                                                                          param_dict["_name"]))
-            stdout, stderr = await process.communicate()
-            if stderr:
-                print("\x1b[31mFailed task: {}/{}: {}\x1b[0m".format(index, task_queue.maxsize, param_dict["_name"]))
-                failed_names.append(param_dict["_name"])
-                if stderr:
-                    print('\x1b[31m{}\x1b[0m'.format(command))
-                    print("\x1b[31m{}\n\x1b[0m".format(stderr.decode().strip()))
+            process = await asyncio.create_subprocess_shell(command)
+            print("Start {:5}: {:2d}/{:2d}, gpu: {}, pid: {}, path: {}".format(key, index, task_queue.maxsize,
+                                                                               resource, process.pid,
+                                                                               param_dict["_output"]))
+            await process.wait()
+            if process.returncode != 0:
+                print("\x1b[31mFailed task: {}/{}: {}\x1b[0m".format(index, task_queue.maxsize, param_dict["_output"]))
+                failed_names.append(param_dict["_output"])
                 break
             else:
-                succeeded_names.append(param_dict["_name"])
+                succeeded_names.append(param_dict["_output"])
         task_queue.task_done()
 
 
