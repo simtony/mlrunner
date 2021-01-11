@@ -1,5 +1,16 @@
 import os
 import re
+import json
+import curses
+
+RED = "\x1b[31m"
+GREEN = "\x1b[32m"
+YELLOW = "\x1b[33m"
+BLUE = "\x1b[34m"
+MAGENTA = "\x1b[35m"
+CYAN = "\x1b[36m"
+WHITE = "\x1b[37m"
+
 # GPU sorting
 def query_gpus():
     """
@@ -119,3 +130,18 @@ def param_dict2command_args(param_dict, bool_as_flag=True):
         else:
             args.append('--{} {}'.format(key, value))
     return ' ' + ' '.join(flags + args) + ' '
+
+
+def json_load(filename):
+    with open(filename, "r") as fin:
+        d = json.load(fin)
+    return d
+
+
+def json_dump(d, filename, sort_keys=True, indent=4):
+    with open(filename, "w") as fout:
+        json.dump(d, fout, sort_keys=sort_keys, indent=indent)
+
+
+def color_print(str, color):
+    print(color + str + "\x1b[0m")

@@ -14,7 +14,7 @@ template:
   train: >
     sleep {sleep} && ls -al
   test: >
-    echo python test.py --output_dir {_output}
+    echo pythonssasdfasdf test.py asdf--output_dir {_output}
 
 # rename a group of parameters for easier readability
 # Applicable only for [param]s
@@ -49,9 +49,9 @@ arch: [ preln, postln ]
 sleep: [ 1, 2, 3 ]
 #name: [ haha ]
 
----
-# parameter choices 2, duplication of 1. This will be filtered out.
-temp: [ hahaha ]
-arch: [ preln, postln ]
-ffn-dim: [ 666, 555, 333 ]
+#---
+## parameter choices 2, duplication of 1. This will be filtered out.
+#temp: [ hahaha ]
+#arch: [ preln, postln ]
+#ffn-dim: [ 666, 555, 333 ]
 

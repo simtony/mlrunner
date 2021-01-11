@@ -9,10 +9,9 @@ import types
 import copy
 import sys
 import os
-import json
 import shutil
 from datetime import datetime
-from tuner.utils import param_dict2name, param_dict2command_args
+from tuner.utils import param_dict2name, param_dict2command_args, json_load, json_dump, color_print, RED, GREEN
 
 
 def run(coro):
@@ -53,7 +52,7 @@ def sweep(param2choices, num_sample=None):
 
 def build_tasks(args):
     # parse yaml file
-    with open(args.config) as fin:
+    with open(args.config, "r") as fin:
         docs = list(yaml.load_all(fin, Loader=yaml.FullLoader))
     assert len(docs) > 1, "Empty yaml file."
     config = docs[0]
@@ -105,6 +104,7 @@ def build_tasks(args):
     uniq_param_dicts = []
     orphan_param_keys = set()
     tasks = []
+    stats = dict()
     for param_dict in itertools.chain.from_iterable(sweep(choice, num_sample=args.sample) for choice in choices):
         # prepare param_dict
         name = param_dict2name(param_dict, str_maxlen=100, no_shrink_dir=args.no_shrink_dir)
@@ -163,63 +163,118 @@ def build_tasks(args):
                 suffix = "> {} 2>&1".format(log_path)
             name2command[name] = command + " " + suffix
         orphan_param_keys.update(param_keys)
-        tasks.append((param_dict, name2command))
-    if orphan_param_keys:
-        print("\x1b[32mOrphan params: {}\x1b[0m".format(orphan_param_keys))
+        stat = {key: {"code": -1} for key in name2command.keys()}
+        if not args.force:
+            stat_path = os.path.join(param_dict["_output"], "stat.json")
+            if os.path.exists(stat_path):
+                o_stat = json_load(stat_path)
+                for key in stat.keys():
+                    if key in o_stat and o_stat[key]["code"] == 0:
+                        stat[key]["code"] = 0
+        tasks.append(dict(param=param_dict, command=name2command))
+        stats[param_dict["_name"]] = stat
     if args.debug:
         tasks = tasks[:1]
-    return resources, tasks
+        stats = {tasks[0]["param"]["_name"]: {key: {"code": -1} for key in tasks[0]["command"].keys()}}
+    return resources, tasks, stats, orphan_param_keys
 
 
-async def build_worker(task_queue, succeeded_names, failed_names, resource):
+async def build_worker(tasks, queue, stats, resource):
     while True:
-        index, (param_dict, name2command) = await task_queue.get()
+        index = await queue.get()
+        param_dict = tasks[index]["param"]
+        name2command = tasks[index]["command"]
+        stat = stats[param_dict["_name"]]
         prefix = "CUDA_VISIBLE_DEVICES={}".format(resource)
         os.makedirs(param_dict["_output"], exist_ok=True)
         for key, command in name2command.items():
             name2command[key] = " ".join([prefix, command])
         param_dict["_commands"] = name2command
-        with open(os.path.join(param_dict["_output"], "param.json"), "w") as fout:
-            json.dump(param_dict, fout, sort_keys=True, indent=4)
+
+        # dump param into json
+        param_path = os.path.join(param_dict["_output"], "param.json")
+        if os.path.exists(param_path):
+            o_param_dict = json_load(param_path)
+            for key, value in param_dict.items():
+                # don't overwrite old commands
+                if key == "_commands":
+                    o_param_dict[key].update(param_dict[key])
+                else:
+                    o_param_dict[key] = param_dict[key]
+        else:
+            o_param_dict = param_dict
+        json_dump(o_param_dict, param_path)
+
         for key, command in name2command.items():
+            info = "{:5}:{:2d}/{:2d}, {}".format(key, index, queue.maxsize, param_dict["_output"])
+            if stat[key]["code"] == 0:
+                print("SKIP " + info)
+                continue
+            stat[key]["gpu"] = resource
+
             process = await asyncio.create_subprocess_shell(command)
-            print("Start {:5}: {:2d}/{:2d}, gpu: {}, pid: {}, path: {}".format(key, index, task_queue.maxsize,
-                                                                               resource, process.pid,
-                                                                               param_dict["_output"]))
+            info = "gpu: {}, ".format(resource) + info
+            print("START   " + info)
             await process.wait()
-            if process.returncode != 0:
-                print("\x1b[31mFailed task: {}/{}: {}\x1b[0m".format(index, task_queue.maxsize, param_dict["_output"]))
-                failed_names.append(param_dict["_output"])
-                break
+
+            returncode = process.returncode
+            stat_path = os.path.join(param_dict["_output"], "stat.json")
+            if os.path.exists(stat_path):
+                o_stat = json_load(stat_path)
+                o_stat.update(stat)
             else:
-                succeeded_names.append(param_dict["_output"])
-        task_queue.task_done()
+                o_stat = stat
+            try:
+                if returncode != 0:
+                    stats[param_dict["_name"]][key]["code"] = 1
+                    o_stat[key]["code"] = 1
+                    color_print("FAIL    " + info, RED)
+                    break
+                else:
+                    stats[param_dict["_name"]][key]["code"] = 0
+                    o_stat[key]["code"] = 0
+
+                    color_print("SUCCEED " + info, GREEN)
+            except Exception as e:
+                print(e, type(e))
+            json_dump(o_stat, stat_path, indent=None)
+        queue.task_done()
 
 
-async def run_all(tasks, resources):
+async def run_all(tasks, stats, resources):
     # populate the task queue
-    task_queue = asyncio.Queue(maxsize=len(tasks))
-    for index, task in enumerate(tasks):
-        task_queue.put_nowait((index, task))
-    print("Total unique tasks: %d" % len(tasks))
-    # build workers that consuming tasks in task_queue asynchronously
-    succeeded_names = []
-    failed_names = []
+    task_num = len(tasks)
+    cmd_num = sum(sum(v["code"] != 0 for v in stat.values()) for stat in stats.values())
+    queue = asyncio.Queue(maxsize=task_num)
+    for index in range(task_num):
+        queue.put_nowait(index)
+    print("Tasks: {}, commands to run: {}".format(task_num, cmd_num))
+
+    # build workers that consuming tasks in task_
     workers = []
     loop = asyncio.get_event_loop()
     for resource in resources:
-        workers.append(loop.create_task(build_worker(task_queue, succeeded_names, failed_names, resource)))
-    await task_queue.join()
+        workers.append(loop.create_task(build_worker(tasks, queue, stats, resource)))
+    await queue.join()
 
     for worker in workers:
         worker.cancel()
     await asyncio.gather(*workers, return_exceptions=True)
+    failed = []
+    for name, stat in stats.items():
+        for code in set(info["code"] for info in stat.values()):
+            if code > 0:
+                failed.append(name)
+                break
 
-    print("Failed tasks: %d/%d" % (len(failed_names), len(tasks)))
-    if failed_names:
-        print("    rm -rf \\")
-        for name in failed_names:
-            print('    %s \\' % name)
+    if failed:
+        color_print("Failed tasks: %d/%d" % (len(failed), len(tasks)), RED)
+        print("rm -rf", end="")
+        for name in failed:
+            print(' \\\n    {}'.format(name), end="")
+        print()
+    else:
+        color_print("No task failed.", GREEN)
 
 
 def main():
@@ -239,9 +294,12 @@ def main():
                         help="Do not create separated output directory for each param choice.")
     parser.add_argument("--no-shrink-dir", default=False, action="store_true",
                         help="Do not eliminate directory of directory params.")
+    parser.add_argument("-f", "--force", default=False, action="store_true",
+                        help="Overwrite tasks already run.")
 
     args = parser.parse_args()
-    resources, tasks = build_tasks(args)
+    resources, tasks, stats, orphans = build_tasks(args)
+    color_print("Orphan params: {}".format(orphans), RED)
     os.makedirs(args.output, exist_ok=True)
     shutil.copyfile(args.config, os.path.join(args.output, args.config))
-    run(run_all(tasks, resources))
+    run(run_all(tasks, stats, resources))
