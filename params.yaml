@@ -12,9 +12,9 @@
 # {_datetime}: current date&time
 template:
   train: >
-    sleep {sleep} && ls -al
+    sleep {sleep} && ls -al [_jkjk]
   test: >
-    echo pythonssasdfasdf test.py asdf--output_dir {_output}
+    echo pythonssasdfasdf test.py asdf --output_dir {_output} --params '{"a": 1, "b": 3}'
 
 # rename a group of parameters for easier readability
 # Applicable only for [param]s
@@ -34,6 +34,7 @@ default:
   ffn-dim: 222
   arch: preln
   sleep: 1
+  _jkjk: 1
 
 # gpu indices to be filled in CUDA_VISIBLE_DEVICES={}. each resource is assigned to a worker.
 # for multi-gpu tasks, simply set [ "1,2", "3,4" ]
