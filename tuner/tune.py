@@ -130,7 +130,7 @@ def build_tasks(args):
                 continue
             empty_params = []
             command = command_template
-            for curly_param in re.findall(r"{[\w]+?}", command):
+            for curly_param in re.findall(r"{[\w-]+?}", command):
                 param = curly_param.strip("{}")
                 if param in param_keys:
                     param_keys.remove(param)
@@ -139,7 +139,7 @@ def build_tasks(args):
                     command = command.replace(curly_param, s)
                 else:
                     empty_params.append(curly_param)
-            for square_param in re.findall(r"\[[\w]+?\]", command):
+            for square_param in re.findall(r"\[[\w-]+?\]", command):
                 param = square_param.strip("[]")
                 if param in param_keys:
                     param_keys.remove(param)
