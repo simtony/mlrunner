@@ -158,7 +158,7 @@ def build_tasks(args):
             log_path = os.path.join(param_dict["_output"], log_file)
 
             if args.debug:
-                suffix = "2>&1 | tee {}".format(log_path)
+                suffix = "2>&1 | tee {}".format(log_path) +"; exit ${PIPESTATUS[0]}"
             else:
                 suffix = "> {} 2>&1".format(log_path)
             name2command[name] = command + " " + suffix
@@ -206,7 +206,7 @@ async def build_worker(tasks, queue, stats, resource):
         json_dump(o_param_dict, param_path)
 
         for key, command in name2command.items():
-            info = "{:5}:{:2d}/{:2d}, {}".format(key, index, queue.maxsize, param_dict["_output"])
+            info = "{:5}:{:2d}/{:2d}, {}".format(key, index + 1, queue.maxsize, param_dict["_output"])
             if stat[key]["code"] == 0:
                 print("SKIP " + info)
                 continue
@@ -233,7 +233,6 @@ async def build_worker(tasks, queue, stats, resource):
                 else:
                     stats[param_dict["_name"]][key]["code"] = 0
                     o_stat[key]["code"] = 0
-
                     color_print("SUCCEED " + info, GREEN)
             except Exception as e:
                 print(e, type(e))
@@ -269,10 +268,8 @@ async def run_all(tasks, stats, resources):
 
     if failed:
         color_print("Failed tasks: %d/%d" % (len(failed), len(tasks)), RED)
-        print("rm -rf", end="")
         for name in failed:
-            print(' \\\n    {}'.format(name), end="")
-        print()
+            color_print('    {}'.format(name), RED)
     else:
         color_print("No task failed.", GREEN)
 

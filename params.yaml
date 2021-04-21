@@ -11,8 +11,9 @@
 # {_output}: /{--output}/{_name}
 # {_datetime}: current date&time
 template:
+  # this train command will fail
   train: >
-    sleep {sleep} && ls -al [_jkjk] [asdf-asdf]
+    sleep {sleep} && ls  [_jkjk] [asdf-asdf]
   test: >
     echo pythonssasdfasdf test.py asdf --output_dir {_output} --params '{"a": 1, "b": 3}'
 
