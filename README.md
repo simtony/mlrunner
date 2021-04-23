@@ -19,12 +19,12 @@ pyyaml
 ```
 # Install
 ```
-git pull https://github.com/simtony/model_tuner
-cd model_tuner && python3 setup.py install
+git pull https://github.com/simtony/runner
+cd runner && python3 setup.py install
 ```
 
 # Usage
 Edit the yaml file. Then run
 ```
-tune -o output -c params.yaml
+run -o output -y params.yaml
 ```   
