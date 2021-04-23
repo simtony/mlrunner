@@ -11,7 +11,7 @@ import sys
 import os
 import shutil
 from datetime import datetime
-from tuner.utils import param_dict2name, param_dict2command_args, json_load, json_dump, color_print, RED, GREEN
+from runner.utils import param_dict2name, param_dict2command_args, json_load, json_dump, color_print, RED, GREEN
 
 
 def run(coro):
@@ -52,7 +52,7 @@ def sweep(param2choices, num_sample=None):
 
 def build_tasks(args):
     # parse yaml file
-    with open(args.config, "r") as fin:
+    with open(args.yaml, "r") as fin:
         docs = list(yaml.load_all(fin, Loader=yaml.FullLoader))
     assert len(docs) > 1, "Empty yaml file."
     config = docs[0]
@@ -95,10 +95,26 @@ def build_tasks(args):
             return {key: value}
 
     choices = docs[1:]
-    if args.param_choices is not None:
-        choices.extend(yaml.load_all(args.param_choices, Loader=yaml.FullLoader))
     assert len(choices) > 0, "Invalid yaml format: no param choices available."
-
+    if args.title is not None:
+        is_title_unset = True
+        is_title_not_exist = True
+        temp_choices = []
+        for choice in choices:
+            if "_title" in choice:
+                is_title_unset = False
+                if choice["_title"] == args.title:
+                    is_title_not_exist = False
+                    del choice["_title"]
+                    temp_choices.append(choice)
+        assert not is_title_unset, "'_title' not in any param choices"
+        assert not is_title_not_exist, "No param choices having '_title'={}".format(args.title)
+        color_print("Run param choices with title '{}'".format(args.title), GREEN)
+        color_print(yaml.dump_all(choices, default_flow_style=True, explicit_start=True), GREEN)
+    else:
+        for choice in choices:
+            if "_title" in choice:
+                del choice["_title"]
     # build task commands and de-duplication
     datetime_str = datetime.now().strftime("%Y-%m-%d.%H:%M:%S")
     uniq_param_dicts = []
@@ -158,7 +174,7 @@ def build_tasks(args):
             log_path = os.path.join(param_dict["_output"], log_file)
 
             if args.debug:
-                suffix = "2>&1 | tee {}".format(log_path) +"; exit ${PIPESTATUS[0]}"
+                suffix = "2>&1 | tee {}".format(log_path) + "; exit ${PIPESTATUS[0]}"
             else:
                 suffix = "> {} 2>&1".format(log_path)
             name2command[name] = command + " " + suffix
@@ -277,26 +293,27 @@ async def run_all(tasks, stats, resources):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-o", "--output", default="output", help="Output directory of all experiments.")
-    parser.add_argument("-c", "--config", default="params.yaml",
+    parser.add_argument("-y", "--yaml", default="params.yaml",
                         help="Yaml configuration file for present experiment group.")
-    parser.add_argument("-p", "--param_choices", default="",
-                        help="Extra param choices specified in string.")
+    parser.add_argument("-t", "--title", default=None, help="Choose param choices with specified title to sweep.")
     parser.add_argument("-d", "--debug", default=False, action='store_true',
                         help="Debug mode. Only run the first task, log will be directed to stdout.")
-    parser.add_argument("--command", default=None, type=str,
+    parser.add_argument("-c", "--command", default=None, type=str,
                         help="Choose which command to run. All commands are ran by default.")
+    parser.add_argument("-f", "--force", default=False, action="store_true",
+                        help="Overwrite tasks already run.")
+
     parser.add_argument("--sample", default=None, type=int,
                         help="Number of random samples from each param choice. All combinations are ran by default.")
     parser.add_argument("--no-param-dir", default=False, action="store_true",
                         help="Do not create separated output directory for each param choice.")
     parser.add_argument("--no-shrink-dir", default=False, action="store_true",
                         help="Do not eliminate directory of directory params.")
-    parser.add_argument("-f", "--force", default=False, action="store_true",
-                        help="Overwrite tasks already run.")
 
     args = parser.parse_args()
     resources, tasks, stats, orphans = build_tasks(args)
     color_print("Orphan params: {}".format(orphans), RED)
     os.makedirs(args.output, exist_ok=True)
-    shutil.copyfile(args.config, os.path.join(args.output, args.config))
+    shutil.copyfile(args.yaml,
+                    os.path.join(args.output, args.yaml if args.title is None else args.yaml + "." + args.title))
     run(run_all(tasks, stats, resources))

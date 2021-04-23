@@ -1,11 +1,11 @@
 import setuptools
 
 setuptools.setup(
-        name='model_tuner',
-        version='0.2',
+        name='runner',
+        version='0.3',
         author='Tony Ou',
         author_email='simtony2@gmail.com',
-        url='https://github.com/simtony/tuner',
+        url='https://github.com/simtony/runner',
         description="A light-weight script for launching large number of experiments.",
         classifiers=[
             "Programming Language :: Python :: 3",
@@ -17,7 +17,7 @@ setuptools.setup(
         python_requires='>=3.6.*',
         entry_points={
             'console_scripts': [
-                'tune = tuner.tune:main'
+                'run = runner.run:main'
             ]
         }
 )
