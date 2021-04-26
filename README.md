@@ -19,7 +19,7 @@ pyyaml
 ```
 # Install
 ```
-git pull https://github.com/simtony/runner
+git pull https://github.com/simtony/runner.git
 cd runner && python3 setup.py install
 ```
 
