@@ -47,7 +47,7 @@ resource: [ "1" , "2" ]
 # list all possible choices here, model_tuner.py will sweep all possible combinations.
 ---
 # parameter choices 1
-_title: asdf
+_title: w1
 temp: [ runner/run.py ]
 arch: [ preln, postln ]
 sleep: [ 1, 2, 3 ]
@@ -55,7 +55,7 @@ sleep: [ 1, 2, 3 ]
 
 ---
 # parameter choices 2, duplication of 1. This will be filtered out.
-_title: asdf
+_title: w2
 temp: [ hahaha ]
 arch: [ preln, postln ]
 ffn-dim: [ 666, 555, 333 ]
