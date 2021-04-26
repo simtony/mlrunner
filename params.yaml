@@ -8,8 +8,9 @@
 # affect {_name} and {_output}
 # reserved params:
 # {_name}: name of param choices
-# {_output}: /{--output}/{_name}
+# {_output}: output directory by param choice, {path_specified_by_--output}/{_name}
 # {_datetime}: current date&time
+# params not specified in the placeholder [`] or {`} will only affect the name of output directory
 template:
   # this train command will fail
   train: >
@@ -39,17 +40,18 @@ default:
   asdf-asdf: 1
 
 # gpu indices to be filled in CUDA_VISIBLE_DEVICES={}. each resource is assigned to a worker.
-# for multi-gpu tasks, simply set [ "1,2", "3,4" ]
+# for multi-gpu tasks, set [ "1,2", "3,4" ]
 # a single resource can be assigned multiple times, typically when your task requires a very low gpu utilization
 # [ "1", "2", "3", "1", "2", "3" ]
 resource: [ "1" , "2" ]
 
-# list all possible choices here, model_tuner.py will sweep all possible combinations.
+# list all possible choices here, runner will sweep all possible combinations.
+# _title is a reserved name used to select param choice to run, e.g. "run -t w1" sweeps param choice with _title=w1
 ---
 # parameter choices 1
 _title: w1
 temp: [ runner/run.py ]
-arch: [ preln, postln ]
+_jkjk: [ 2, 3 ]
 sleep: [ 1, 2, 3 ]
 #name: [ haha ]
 
