@@ -55,7 +55,7 @@ def build_tasks(args):
     with open(args.yaml, "r") as fin:
         docs = list(yaml.load_all(fin, Loader=yaml.FullLoader))
     assert len(docs) > 1, "Empty yaml file."
-    config = docs[0]
+    config = docs[0]  # first doc for meta data
 
     def safe_load(key, data_type, required=False):
         value = data_type()
@@ -76,25 +76,17 @@ def build_tasks(args):
     resources = [str(i) for i in safe_load("resource", list, required=True)]
     defaults = safe_load("default", dict)
     aliases = safe_load("alias", dict)
+    packs = safe_load("pack", dict)
     if aliases:
         for key, value in aliases.items():
             assert isinstance(value, (list, dict)), \
                 "Invalid yaml format: '{}' in 'alias' should be a list or dict.".format(key)
+    if packs:
+        for key, value in aliases.items():
+            assert isinstance(value, (list, dict)), \
+                "Invalid yaml format: '{}' in 'pack' should be a list or dict.".format(key)
 
-    def safe_alias(key, value):
-        if key in aliases:
-            if isinstance(aliases[key], list):
-                # param replacement
-                return {new_key: value for new_key in aliases[key]}
-            if isinstance(aliases[key], dict):
-                # param remap
-                assert value in aliases[key], \
-                    "value of '{}' should be in {}".format(key, tuple(aliases[key].keys()))
-                return aliases[key][value]
-        else:
-            return {key: value}
-
-    choices = docs[1:]
+    choices = docs[1:]  # first doc for meta data
     assert len(choices) > 0, "Invalid yaml format: no param choices available."
     if args.title is not None:
         is_title_unset = True
@@ -117,21 +109,50 @@ def build_tasks(args):
             del choice["_title"]
     # build task commands and de-duplication
     datetime_str = datetime.now().strftime("%Y-%m-%d.%H:%M:%S")
-    uniq_param_dicts = []
-    orphan_param_keys = set()
+    orphan_param_keys = set()  # track params not consumed by any command.
+    uniq_param_dicts = []  # avoid duplication
     tasks = []
     stats = dict()
+
+    def get_pack_or_alias(key, value, packs_or_aliases):
+        assert key in packs_or_aliases
+        if isinstance(packs_or_aliases[key], list):
+            # param replacement
+            return {new_key: value for new_key in packs_or_aliases[key]}
+        if isinstance(packs_or_aliases[key], dict):
+            # param remap
+            assert value in packs_or_aliases[key], \
+                "value of '{}' should be in {}".format(key, tuple(packs_or_aliases[key].keys()))
+            return packs_or_aliases[key][value]
+
     for param_dict in itertools.chain.from_iterable(sweep(choice, num_sample=args.sample) for choice in choices):
-        # prepare param_dict
+        # get name before messing up with param_dict
         name = param_dict2name(param_dict, str_maxlen=100, no_shrink_dir=args.no_shrink_dir)
-        for key, value in defaults.items():
-            if key not in param_dict:
-                param_dict[key] = value
+
+        # update with packed params
+        pack_update_dict = dict()
+        pack_param = set()
+        for param, value in param_dict.items():
+            if param in packs:
+                pack_param.add(param)
+                pack_update_dict.update(get_pack_or_alias(param, value, packs))
+        for param in pack_param:
+            del param_dict[param]
+        param_dict.update(pack_update_dict)
+
+        # update missing with default
+        for param, value in defaults.items():
+            if param not in param_dict:
+                param_dict[param] = value
+
+        # deduplication
         if param_dict in uniq_param_dicts:
             continue
         else:
             uniq_param_dicts.append(copy.deepcopy(param_dict))
+
         param_keys = set(param_dict.keys())
+        # filling builtin params
         param_dict["_name"] = name
         if args.no_param_dir:
             param_dict["_output"] = args.output
@@ -146,8 +167,10 @@ def build_tasks(args):
                 continue
             empty_params = []
             command = command_template
+            # fill in curly params
             for curly_param in re.findall(r"{[\w-]+?}", command):
                 param = curly_param.strip("{}")
+                assert param not in packs, "Packed param '{}' should not be specified in command.".format(param)
                 if param in param_keys:
                     param_keys.remove(param)
                 if param in param_dict:
@@ -155,18 +178,27 @@ def build_tasks(args):
                     command = command.replace(curly_param, s)
                 else:
                     empty_params.append(curly_param)
+
+            # fill in square params and perform param remap
             for square_param in re.findall(r"\[[\w-]+?\]", command):
                 param = square_param.strip("[]")
+                assert param not in packs, "Packed param '{}' should not be specified in command.".format(param)
                 if param in param_keys:
                     param_keys.remove(param)
                 if param in param_dict:
-                    s = param_dict2command_args(safe_alias(param, param_dict[param]), bool_as_flag=True)
+                    if param in aliases:
+                        s = param_dict2command_args(get_pack_or_alias(param, param_dict[param], aliases),
+                                                    bool_as_flag=True)
+                    else:
+                        s = param_dict2command_args({param: param_dict[param]}, bool_as_flag=True)
                     command = command.replace(square_param, s)
                 else:
                     empty_params.append(square_param)
 
             assert not empty_params, "params {} are not specified in 'default' or 'param_choice'".format(empty_params)
-            command = " ".join(command.split())
+            command = " ".join(command.split())  # clear messed spaces
+
+            # extra params for logging
             if args.no_param_dir:
                 log_file = "log.{}.{}.{}".format(name, param_dict["_datetime"], param_dict["_name"])
             else:
@@ -177,6 +209,7 @@ def build_tasks(args):
                 suffix = "2>&1 | tee {}".format(log_path) + "; exit ${PIPESTATUS[0]}"
             else:
                 suffix = "> {} 2>&1".format(log_path)
+
             name2command[name] = command + " " + suffix
         orphan_param_keys.update(param_keys)
         stat = {key: {"code": -1} for key in name2command.keys()}

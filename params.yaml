@@ -11,32 +11,41 @@
 # {_output}: /{--output}/{_name}
 # {_datetime}: current date&time
 template:
-  # this train command will fail
-  train: >
-    sleep {sleep} && ls  [_jkjk] [asdf-asdf]
-  test: >
-    echo pythonssasdfasdf test.py asdf --output_dir {_output} --params '{"a": 1, "b": 3}'
+  base: >
+    echo command {curl} [bracket] {_datetime} {_name} {_output}
+  replace: >
+    echo command [alias_replace]
+  remap: >
+    echo command [alias_remap]
+  pack: >
+    echo command {curl} [bracket]
 
-# rename a group of parameters for easier readability
+# replace param to group of new params.
 # Applicable only for [param]s
 alias:
-  # list for alias by name, inherit value.
-  # ffn-embed=666 will results in encoder-ffn-embed-dim=decoder-ffn-embed-dim=666
-  ffn-embed: [ encoder-ffn-embed-dim, decoder-ffn-embed-dim ]
-  embed-dim: [ encoder-embed-dim, decoder-embed-dim ]
-  # dict for alias by name and value, inherit value and param type
-  # arch=preln will be replaced as encoder-normalize-before=True, decoder-normalize-before=True
-  arch: # remap
-    preln: { encoder-normalize-before: True, decoder-normalize-before: True }
-    postln: { encoder-normalize-before: False, decoder-normalize-before: False }
+  # alias_replace=1 will results in alias_replaced1=alias_replaced2=1
+  alias_replace: [ alias_replaced1, alias_replaced2 ]
+
+  # alias_remap=remap1 will be replaced as alias_remap_new_bracket1=1, remap_new_bracket2=2
+  alias_remap: # remap
+    remap1: { alias_remap_new_bracket1: 1, alias_remap_new_bracket2: 2 }
+
+# fill in values to group of params specified in the command.
+# pack params(in this example, pack_replace and pack_remap) should not be specified in command.
+pack: # pack
+  # pack_replace=1 will results in curl=bracket=1
+  pack_replace: [ curl, bracket ]
+  # pack_remap=remap1 will be replaced as curl=1, bracket=2
+  pack_remap:
+    remap1: { curl: 1, bracket: 2 }
+
 
 default:
-  temp: data/sdf/sdf/asdf/asdf/asdf/asdfasdf/
-  ffn-dim: 222
-  arch: preln
-  sleep: 1
-  _jkjk: 1
-  asdf-asdf: 1
+  curl: 0
+  bracket: 0
+  alias_replace: 1
+  alias_remap: remap1
+
 
 # gpu indices to be filled in CUDA_VISIBLE_DEVICES={}. each resource is assigned to a worker.
 # for multi-gpu tasks, simply set [ "1,2", "3,4" ]
@@ -46,17 +55,30 @@ resource: [ "1" , "2" ]
 
 # list all possible choices here, model_tuner.py will sweep all possible combinations.
 ---
-# parameter choices 1
-_title: w1
-temp: [ runner/run.py ]
-arch: [ preln, postln ]
-sleep: [ 1, 2, 3 ]
-#name: [ haha ]
+_title: base
+curl: [ 1 ]
+bracket: [ 1 ]
 
 ---
-# parameter choices 2, duplication of 1. This will be filtered out.
-_title: w2
-temp: [ hahaha ]
-arch: [ preln, postln ]
-ffn-dim: [ 666, 555, 333 ]
+_title: missed
+curl: [ 1 ]
 
+---
+_title: missed_and_dummy
+dummy: [ 1 ]
+
+---
+_title: replace
+replace: [ 1 ]
+
+---
+_title: remap
+remap: [ remap1 ]
+
+---
+_title: pack_replace
+pack_replace: [ 1 ]
+
+---
+_title: pack_remap
+pack_remap: [ remap1 ]
