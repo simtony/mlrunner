@@ -21,8 +21,8 @@ pyyaml
 ## Install
 
 ```
-git pull https://github.com/simtony/runner
-cd runner && python3 setup.py install
+git clone https://github.com/simtony/runner.git
+cd runner && pip install .
 ```
 
 ## Usage
