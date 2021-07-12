@@ -67,7 +67,9 @@ If your code writes files to the disk, it is recommended to specify the output d
 to `{_output}=<output>/<name_of_param>`, e.g., `--tensorboard_dir {_output}/tb`.
 
 If `--no-param-dir` is specified, the directory `output/<name_of_param>/` will not be created and logs will be
-redirected to `output/<name_of_param>/log.command.<datetime>.<name_of_param>`. `{_output}=<output>`. This is useful when
+redirected to `output/<name_of_param>/log.command.<datetime>.<name_of_param>`. `{_output}=<output>`. 
+
+This is useful when
 you want to process a large file in parallel. For example, suppose you have a file `text.txt` to be parsed
 with `parse.py`, which is written in single gpu. You can first split `text.txt` into `text.txt.0, text.txt.1, ...`, then
 specify `params.yaml` as
@@ -110,7 +112,7 @@ _title: machine2
 file: [ text.txt.3, text.txt.4 ]
 ```
 
-then you can simply run `run -d machine1` on machine1 and `run -d machine2` on machine2.
+then you can simply run `run -t machine1` on machine1 and `run -t machine2` on machine2.
 
 If multiple templates are defined, by default all of them will be run. But you may want to specify which command to run,
 for example, train once on training set but test on different test sets. You can use `-c <command>` to select which
