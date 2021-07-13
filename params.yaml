@@ -61,8 +61,8 @@ resource: [ "1" , "2" ]
 # list all possible choices here, model_tuner.py will sweep all possible combinations.
 ---
 _title: base
-curl: [ "1" ]
-bracket: [ "1" ]
+curl: [ "1 " ]
+bracket: [ "1 " ]
 
 ---
 _title: missed

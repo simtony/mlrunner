@@ -131,9 +131,6 @@ def param_dict2command_args(param_dict, bool_as_flag=True):
             if value:
                 flags.append('--{}'.format(key))
         elif isinstance(value, str):
-            if re.findall(r"\s", value):
-                # avoid trimming off white spaces which are part of the string value
-                value = repr(value)
             # as we are building a shell command, shell escapes should be taken care of.
             args.append(shlex.join(["--{}".format(key), value]))
     return ' ' + ' '.join(flags + args) + ' '
