@@ -4,6 +4,10 @@
 # Command templates.
 # {param} to replace by value: {param} -> value
 # [param] to replace by key and value: [param] -> --key value
+# only "snake-param" or "snake_param" are valid.
+# [param]: matched by r"\[[\w\-\_]+?\]"
+# {param}: matched by r"{[\w\-\_]+?}"
+
 # param not specified with either {param} and [param], but appearing in param choice will only
 # affect {_name} and {_output}
 # reserved params:
@@ -14,7 +18,7 @@ template:
   base: >
     echo command {curl} [bracket] {_datetime} {_name} {_output}
   replace: >
-    echo command [alias_replace]
+    echo command [alias-replace] "{'temp-temp': {temp-temp}}"
   remap: >
     echo command [alias_remap]
   pack: >
@@ -24,7 +28,7 @@ template:
 # Applicable only for [param]s
 alias:
   # alias_replace=1 will results in alias_replaced1=alias_replaced2=1
-  alias_replace: [ alias_replaced1, alias_replaced2 ]
+  alias-replace: [ alias_replaced1, alias_replaced2 ]
 
   # alias_remap=remap1 will be replaced as alias_remap_new_bracket1=1, remap_new_bracket2=2
   alias_remap: # remap
@@ -43,8 +47,9 @@ pack: # pack
 default:
   curl: 0
   bracket: 0
-  alias_replace: 1
+  alias-replace: 1
   alias_remap: remap1
+  temp-temp: 1000
 
 
 # gpu indices to be filled in CUDA_VISIBLE_DEVICES={}. each resource is assigned to a worker.
@@ -69,7 +74,8 @@ dummy: [ 1 ]
 
 ---
 _title: replace
-alias_replace: [ "{'a': 'b'}" ]
+# place quote to protect white spaces
+alias-replace: [ "{'a': 'b'} " ]
 
 ---
 _title: remap

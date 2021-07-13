@@ -2,6 +2,7 @@ import os
 import re
 import json
 import curses
+import shlex
 
 RED = "\x1b[31m"
 GREEN = "\x1b[32m"
@@ -99,6 +100,7 @@ def entry2str(name, value, str_maxlen, no_shrink_dir=False):
         if len(value) > str_maxlen:
             value = value[-str_maxlen:]
         if re.findall(r"\s", value):
+            # avoid trimming off white spaces which are part of the string value
             value = repr(value)
     elif isinstance(value, bool):
         if value:
@@ -128,10 +130,12 @@ def param_dict2command_args(param_dict, bool_as_flag=True):
         if bool_as_flag and isinstance(value, bool):
             if value:
                 flags.append('--{}'.format(key))
-        elif isinstance(value, str) and re.findall(r"\s", value):
-            args.append('--{} {}'.format(key, repr(value)))
-        else:
-            args.append('--{} {}'.format(key, value))
+        elif isinstance(value, str):
+            if re.findall(r"\s", value):
+                # avoid trimming off white spaces which are part of the string value
+                value = repr(value)
+            # as we are building a shell command, shell escapes should be taken care of.
+            args.append(shlex.join(["--{}".format(key), value]))
     return ' ' + ' '.join(flags + args) + ' '
 
 

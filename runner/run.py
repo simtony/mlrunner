@@ -4,6 +4,7 @@ import argparse
 import yaml
 import random
 import itertools
+import shlex
 import re
 import types
 import copy
@@ -168,7 +169,7 @@ def build_tasks(args):
             empty_params = []
             command = command_template
             # fill in curly params
-            for curly_param in re.findall(r"{[\w-]+?}", command):
+            for curly_param in re.findall(r"{[\w\-\_]+?}", command):
                 param = curly_param.strip("{}")
                 assert param not in packs, "Packed param '{}' should not be specified in command.".format(param)
                 if param in param_keys:
@@ -180,7 +181,7 @@ def build_tasks(args):
                     empty_params.append(curly_param)
 
             # fill in square params and perform param remap
-            for square_param in re.findall(r"\[[\w-]+?\]", command):
+            for square_param in re.findall(r"\[[\w\-\_]+?\]", command):
                 param = square_param.strip("[]")
                 assert param not in packs, "Packed param '{}' should not be specified in command.".format(param)
                 if param in param_keys:
@@ -206,9 +207,11 @@ def build_tasks(args):
             log_path = os.path.join(param_dict["_output"], log_file)
 
             if args.debug:
-                suffix = "2>&1 | tee {}".format(log_path) + "; exit ${PIPESTATUS[0]}"
+                # log_path may contain tokens that should be excaped in shell.
+                # os.makedirs implicitly handle it, here we should handle it explicitly.
+                suffix = shlex.join(["2>&1", "|", "tee", log_path, "; exit ${PIPESTATUS[0]}"])
             else:
-                suffix = "> {} 2>&1".format(log_path)
+                suffix = shlex.join([">", "log_path", "2>&1"])
 
             name2command[name] = command + " " + suffix
         orphan_param_keys.update(param_keys)
