@@ -209,11 +209,12 @@ def build_tasks(args):
             if args.debug:
                 # log_path may contain tokens that should be excaped in shell.
                 # os.makedirs implicitly handle it, here we should handle it explicitly.
-                suffix = shlex.join(["2>&1", "|", "tee", log_path, "; exit ${PIPESTATUS[0]}"])
+                suffix = "2>&1 | tee {}".format(shlex.quote(log_path)) + "; exit ${PIPESTATUS[0]}"
             else:
-                suffix = shlex.join([">", "log_path", "2>&1"])
+                suffix = "> {} 2>&1".format(shlex.quote(log_path))
 
             name2command[name] = command + " " + suffix
+            print(name2command[name])
         orphan_param_keys.update(param_keys)
         stat = {key: {"code": -1} for key in name2command.keys()}
         if not args.force:
