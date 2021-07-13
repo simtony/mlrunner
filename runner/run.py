@@ -214,7 +214,6 @@ def build_tasks(args):
                 suffix = "> {} 2>&1".format(shlex.quote(log_path))
 
             name2command[name] = command + " " + suffix
-            print(name2command[name])
         orphan_param_keys.update(param_keys)
         stat = {key: {"code": -1} for key in name2command.keys()}
         if not args.force:
