@@ -261,7 +261,7 @@ async def build_worker(tasks, queue, stats, resource):
                 continue
             stat[key]["gpu"] = resource
 
-            process = await asyncio.create_subprocess_shell(command)
+            process = await asyncio.create_subprocess_shell(command, executable='/bin/bash')
             info = "gpu: {}, ".format(resource) + info
             print("START   " + info)
             await process.wait()

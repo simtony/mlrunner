@@ -98,7 +98,8 @@ def entry2str(name, value, str_maxlen, no_shrink_dir=False):
             value = re.sub("/", "_", value)
         if len(value) > str_maxlen:
             value = value[-str_maxlen:]
-
+        if re.findall(r"\s", value):
+            value = repr(value)
     elif isinstance(value, bool):
         if value:
             value = "T"
@@ -127,6 +128,8 @@ def param_dict2command_args(param_dict, bool_as_flag=True):
         if bool_as_flag and isinstance(value, bool):
             if value:
                 flags.append('--{}'.format(key))
+        elif isinstance(value, str) and re.findall(r"\s", value):
+            args.append('--{} {}'.format(key, repr(value)))
         else:
             args.append('--{} {}'.format(key, value))
     return ' ' + ' '.join(flags + args) + ' '
