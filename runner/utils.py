@@ -133,6 +133,8 @@ def param_dict2command_args(param_dict, bool_as_flag=True):
         elif isinstance(value, str):
             # as we are building a shell command, shell escapes should be taken care of.
             args.append(shlex.join(["--{}".format(key), value]))
+        else:
+            args.append('--{} {}'.format(key, value))
     return ' ' + ' '.join(flags + args) + ' '
 
 
