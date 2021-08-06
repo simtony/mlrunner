@@ -57,6 +57,9 @@ def build_tasks(args):
         docs = list(yaml.load_all(fin, Loader=yaml.FullLoader))
     assert len(docs) > 1, "Empty yaml file."
     config = docs[0]  # first doc for meta data
+    if args.resource:
+        print("Override resource to {}".format(repr(args.resource)))
+        config["resource"] = args.resource
 
     def safe_load(key, data_type, required=False):
         value = data_type()
@@ -338,6 +341,9 @@ def main():
                         help="choose which command to run, by default run all commands")
     parser.add_argument("-f", "--force", default=False, action="store_true",
                         help="whether to overwrite tasks successfully ran")
+    parser.add_argument("-r", "--resource", default="", nargs="+",
+                        help="override resources in params.yaml with a space separate list, "
+                             "for example `-r 1,2 3,4` gives ['1,2', '3,4']")
 
     parser.add_argument("--sample", default=None, type=int,
                         help="number of random samples from each param choice, by default all params choices are ran")

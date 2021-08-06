@@ -21,8 +21,7 @@ pyyaml
 ## Install
 
 ```
-git clone https://github.com/simtony/runner.git
-cd runner && pip install .
+pip install git+https://github.com/simtony/runner.git
 ```
 
 ## Usage
