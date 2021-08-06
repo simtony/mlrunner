@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
         name='runner',
-        version='0.5.0',
+        version='0.5.1',
         author='Tony Ou',
         author_email='simtony2@gmail.com',
         url='https://github.com/simtony/runner',

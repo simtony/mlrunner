@@ -1,8 +1,12 @@
+import glob
 import os
+import json
 import re
+import collections
 import json
 import curses
 import shlex
+import tabulate
 
 RED = "\x1b[31m"
 GREEN = "\x1b[32m"
@@ -153,20 +157,11 @@ def json_dump(d, filename, sort_keys=True, indent=4):
 def color_print(str, color):
     print(color + str + "\x1b[0m")
 
-
-import glob
-import os
-import json
-import re
-import tabulate
-import collections
-
-Experiment = collections.namedtuple("Experiment", ["cache", "metric", "param"])
-
-
-def float_trunc(x, significant=4):
-    return float(format(x, '.{}g'.format(significant)))
-
+def float_trunc(x, significant=2):
+    if x > 1:
+        return float(format(x, '.{}f'.format(significant)))
+    else:
+        return float(format(x, '.{}g'.format(significant)))
 
 def glob_output(output="output", pattern="*"):
     paths = [path for path in glob.glob(os.path.join(output, pattern)) if os.path.isdir(path)]
@@ -180,10 +175,6 @@ def latest_log(command, path, index=-1):
     if index < -num_logs or index > num_logs - 1:
         return None
     return paths[index]
-
-
-def float_trunc(x, significant=5):
-    return float(format(x, '.{}g'.format(significant)))
 
 
 def load_params(path):
@@ -209,12 +200,12 @@ def tsv_table(entries, headers):
             print(list2tsv(entry))
 
 
-def compute_mean_std_num(values):
+def compute_mean_std_num(values, float_sig=2):
     num = len(values)
     if num == 0:
         return 0, 0, 0
-    mean = float_trunc(sum(values) / num)
-    std = float_trunc((sum((v - mean) ** 2 for v in values) / num) ** 0.5)
+    mean = float_trunc(sum(values) / num, float_sig)
+    std = float_trunc((sum((v - mean) ** 2 for v in values) / num) ** 0.5, float_sig)
     return mean, std, num
 
 
@@ -257,6 +248,9 @@ class Key2Values(object):
                 self.group[k].extend(v)
             else:
                 self.group[k].append(v)
+
+
+Experiment = collections.namedtuple("Experiment", ["cache", "metric", "param"])
 
 
 class Examiner(object):
@@ -318,15 +312,14 @@ class Examiner(object):
                    [experiment.metric.get(h, None) for h in metric_headers]
                    for experiment in self.experiments.values()]
         if fmt == "tsv":
-            print(list2tsv(headers))
-            for entry in entries:
-                print(list2tsv(entry))
+            tsv_table(entries, headers)
         elif fmt == "md":
             print(tabulate.tabulate(entries, headers, "pipe"))
         else:
             raise ValueError("Unsupported table format: {}".format(repr(fmt)))
 
-    def tabulate_merge(self, param_cands, metric_cands, multiple=True, fmt="tsv", concise=True):
+    def tabulate_merge(self, param_cands, metric_cands, multiple=True, fmt="tsv",
+                       show_num=False, concise=True, float_sig=2):
         param2values = self._get_param2values()
         param_headers = set(param2values.keys())
         param_cands = set(p for p in param_cands if p in param_headers)
@@ -345,6 +338,7 @@ class Examiner(object):
             print("Empty effective metric_cands to merge, skipped.")
             return
         print("Merge metrics {} with the same params {}.".format(metric_cands, param_cands))
+        print()
 
         key2metrics = Key2Values(list)
         for experiment in self.experiments.values():
@@ -367,9 +361,15 @@ class Examiner(object):
         if multiple:
             headers = list(merged_param_headers)
             for m in metric_cands:
-                headers.extend([m, "{}_std".format(m), "{}_num".format(m)])
+                if show_num:
+                    headers.extend([m, "{}_std".format(m), "{}_num".format(m)])
+                else:
+                    headers.extend([m, "{}_std".format(m)])
         else:
-            headers = merged_param_headers + ["merge", "merge_std", "merge_num"]
+            if show_num:
+                headers = merged_param_headers + ["merge", "merge_std", "merge_num"]
+            else:
+                headers = merged_param_headers + ["merge", "merge_std"]
 
         entries = []
         for key, metrics in key2metrics.items():
@@ -382,9 +382,22 @@ class Examiner(object):
             if multiple:
                 for m in metric_cands:
                     values = [metric[m] for metric in metrics if m in metric]
-                    entry.extend(compute_mean_std_num(values))
+                    mean, std, num = compute_mean_std_num(values, float_sig)
+                    if show_num:
+                        entry.extend([mean, std, num])
+                    else:
+                        entry.extend([mean, std])
             else:
                 values = sum(list(metric.values()) for metric in metrics)
-                entry.extend(compute_mean_std_num(values))
+                mean, std, num = compute_mean_std_num(values, float_sig)
+                if show_num:
+                    entry.extend([mean, std, num])
+                else:
+                    entry.extend([mean, std])
             entries.append(entry)
-        tsv_table(entries, headers)
+        if fmt == "tsv":
+            tsv_table(entries, headers)
+        elif fmt == "md":
+            print(tabulate.tabulate(entries, headers, "pipe"))
+        else:
+            raise ValueError("Unsupported table format: {}".format(repr(fmt)))
