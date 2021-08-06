@@ -12,6 +12,7 @@ MAGENTA = "\x1b[35m"
 CYAN = "\x1b[36m"
 WHITE = "\x1b[37m"
 
+
 # GPU sorting
 def query_gpus():
     """
@@ -151,3 +152,239 @@ def json_dump(d, filename, sort_keys=True, indent=4):
 
 def color_print(str, color):
     print(color + str + "\x1b[0m")
+
+
+import glob
+import os
+import json
+import re
+import tabulate
+import collections
+
+Experiment = collections.namedtuple("Experiment", ["cache", "metric", "param"])
+
+
+def float_trunc(x, significant=4):
+    return float(format(x, '.{}g'.format(significant)))
+
+
+def glob_output(output="output", pattern="*"):
+    paths = [path for path in glob.glob(os.path.join(output, pattern)) if os.path.isdir(path)]
+    return sorted(paths)
+
+
+def latest_log(command, path, index=-1):
+    paths = sorted(glob.glob(os.path.join(path, "log.{}.*".format(command))))
+    num_logs = len(paths)
+    assert isinstance(index, int)
+    if index < -num_logs or index > num_logs - 1:
+        return None
+    return paths[index]
+
+
+def float_trunc(x, significant=5):
+    return float(format(x, '.{}g'.format(significant)))
+
+
+def load_params(path):
+    with open(os.path.join(path, "param.json"), "r", encoding="utf-8") as fin:
+        params = json.load(fin)
+    return params
+
+
+def dict2tuple(dictionary, keys):
+    return tuple(dictionary.get(k, None) for k in keys)
+
+
+def list2tsv(t):
+    return "\t".join(str(i) for i in t)
+
+
+def tsv_table(entries, headers):
+    print(list2tsv(headers))
+    for entry in entries:
+        if isinstance(entry, dict):
+            print(list2tsv(dict2tuple(entry, headers)))
+        elif isinstance(entry, (list, tuple)):
+            print(list2tsv(entry))
+
+
+def compute_mean_std_num(values):
+    num = len(values)
+    if num == 0:
+        return 0, 0, 0
+    mean = float_trunc(sum(values) / num)
+    std = float_trunc((sum((v - mean) ** 2 for v in values) / num) ** 0.5)
+    return mean, std, num
+
+
+class Key2Values(object):
+    # Group values with the same key
+    def __init__(self, group_func=list):
+        assert group_func in [list, set]
+        self.group_func = group_func
+        self.group = collections.defaultdict(group_func)
+
+        # redirect methods
+        self.items = self.group.items
+        self.keys = self.group.keys
+        self.values = self.group.values
+        self.get = self.group.get
+        self.__contains__ = self.group.__contains__
+        self.__delitem__ = self.group.__delitem__
+        self.__sizeof__ = self.group.__sizeof__
+
+    def __getitem__(self, item):
+        return self.group[item]
+
+    def __setitem__(self, key, value):
+        self.group[key] = value
+
+    def __repr__(self):
+        return repr(self.group).replace("defaultdict", "Key2Values")
+
+    def __len__(self):
+        return len(self.group)
+
+    def add(self, k, v):
+        if self.group_func == set:
+            if isinstance(v, (list, tuple)):
+                self.group[k].update(v)
+            else:
+                self.group[k].add(v)
+        else:
+            if isinstance(v, (list, tuple)):
+                self.group[k].extend(v)
+            else:
+                self.group[k].append(v)
+
+
+class Examiner(object):
+    def __init__(self):
+        self.exams = {}
+        self.caches = {}
+        self.experiments = {}
+
+    def reset_all(self):
+        self.exams = {}
+        self.reset_cache()
+
+    def reset_cache(self):
+        self.caches = {}
+        self.experiments = {}
+
+    def add_exam(self, key, func):
+        self.exams[key] = func
+
+    def examine(self, exam_keys=None, output="output", pattern="*", verbose=False):
+        if exam_keys is None:
+            exam_keys = self.exams.keys()
+        for path in glob_output(output, pattern):
+            exp = os.path.basename(path)
+            if verbose:
+                print(exp)
+            if exp in self.experiments:
+                experiment = self.experiments[exp]
+            else:
+                experiment = Experiment(cache={}, metric={}, param={})
+            experiment.param.update(load_params(path))
+            for exam_key in exam_keys:
+                self.exams[exam_key](path, experiment, self.caches)
+            self.experiments[exp] = experiment
+
+    def _get_param2values(self):
+        param2values = Key2Values(set)
+        for experiment in self.experiments.values():
+            for k, v in experiment.param.items():
+                if re.match("_", k):
+                    continue
+                param2values.add(k, v)
+        return param2values
+
+    def tabulate(self, fmt="tsv", concise=True):
+        # find unique param values
+        param2values = self._get_param2values()
+        if concise:
+            param_headers = sorted(list(k for k, v in param2values.items() if len(v) > 1))
+        else:
+            param_headers = sorted(list(param2values.keys()))
+
+        metric_headers = set()
+        for experiment in self.experiments.values():
+            metric_headers.update(experiment.metric.keys())
+        metric_headers = sorted(list(metric_headers))
+        headers = param_headers + metric_headers
+        entries = [[experiment.param.get(h, None) for h in param_headers] +
+                   [experiment.metric.get(h, None) for h in metric_headers]
+                   for experiment in self.experiments.values()]
+        if fmt == "tsv":
+            print(list2tsv(headers))
+            for entry in entries:
+                print(list2tsv(entry))
+        elif fmt == "md":
+            print(tabulate.tabulate(entries, headers, "pipe"))
+        else:
+            raise ValueError("Unsupported table format: {}".format(repr(fmt)))
+
+    def tabulate_merge(self, param_cands, metric_cands, multiple=True, fmt="tsv", concise=True):
+        param2values = self._get_param2values()
+        param_headers = set(param2values.keys())
+        param_cands = set(p for p in param_cands if p in param_headers)
+        merged_params = param_headers - param_cands
+        param_cands = list(param_cands)
+        merged_params = sorted(list(merged_params))
+
+        metric_headers = set()
+        for experiment in self.experiments.values():
+            metric_headers.update(experiment.metric.keys())
+        metric_cands = list(m for m in metric_cands if m in metric_headers)
+        if not param_cands:
+            print("Empty effective param_cands to merge, skipped.")
+            return
+        if not metric_cands:
+            print("Empty effective metric_cands to merge, skipped.")
+            return
+        print("Merge metrics {} with the same params {}.".format(metric_cands, param_cands))
+
+        key2metrics = Key2Values(list)
+        for experiment in self.experiments.values():
+            key = tuple(experiment.param.get(p, None) for p in merged_params)
+            metric = dict((m, experiment.metric[m]) for m in metric_cands if m in experiment.metric)
+            key2metrics.add(key, metric)
+
+        if concise:
+            # filter out params with the same values for all experiments
+            merged_param_headers = [p for p in merged_params if len(param2values[p]) > 1]
+            merged_param_idxs = [i for i, p in enumerate(merged_params) if p in merged_param_headers]
+        else:
+            merged_param_headers = merged_params
+            merged_param_idxs = list(range(len(merged_params)))
+
+        if not merged_param_headers:
+            assert len(key2metrics) == 1
+            merged_param_headers = ["null"]
+
+        if multiple:
+            headers = list(merged_param_headers)
+            for m in metric_cands:
+                headers.extend([m, "{}_std".format(m), "{}_num".format(m)])
+        else:
+            headers = merged_param_headers + ["merge", "merge_std", "merge_num"]
+
+        entries = []
+        for key, metrics in key2metrics.items():
+            entry = []
+            if merged_param_idxs:
+                entry.extend(key[i] for i in merged_param_idxs)
+            else:
+                entry.append("null")
+
+            if multiple:
+                for m in metric_cands:
+                    values = [metric[m] for metric in metrics if m in metric]
+                    entry.extend(compute_mean_std_num(values))
+            else:
+                values = sum(list(metric.values()) for metric in metrics)
+                entry.extend(compute_mean_std_num(values))
+            entries.append(entry)
+        tsv_table(entries, headers)
