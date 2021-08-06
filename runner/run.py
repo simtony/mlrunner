@@ -75,8 +75,11 @@ def build_tasks(args):
     name2template = safe_load("template", dict, required=True)
     assert name2template, "No command templates."
     if args.command:
-        assert args.command in name2template, \
-            "command={} is not in valid commands {}".format(args.command, tuple(name2template.keys()))
+        for command in args.command:
+            assert command in name2template, \
+                "command={} is not in valid commands {}".format(command,
+                                                                tuple(name2template.keys()))
+        color_print("Run selected commands: {}".format(args.command), GREEN)
     resources = [str(i) for i in safe_load("resource", list, required=True)]
     defaults = safe_load("default", dict)
     aliases = safe_load("alias", dict)
@@ -167,7 +170,7 @@ def build_tasks(args):
         # prepare command
         name2command = {}
         for name, command_template in name2template.items():
-            if args.command is not None and args.command != name:
+            if args.command is not None and name not in args.command:
                 continue
             empty_params = []
             command = command_template
@@ -337,7 +340,7 @@ def main():
     parser.add_argument("-t", "--title", default=None, help="choose param choices with specified title to sweep")
     parser.add_argument("-d", "--debug", default=False, action='store_true',
                         help="debug mode: only run the first task, log will be directed to stdout.")
-    parser.add_argument("-c", "--command", default=None, type=str,
+    parser.add_argument("-c", "--command", default=None, type=str, nargs="+",
                         help="choose which command to run, by default run all commands")
     parser.add_argument("-f", "--force", default=False, action="store_true",
                         help="whether to overwrite tasks successfully ran")
