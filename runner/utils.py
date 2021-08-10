@@ -88,7 +88,7 @@ def snake2camel(snake_str, shrink_keep=0):
         components = components[0].split('_')
     if shrink_keep:
         return ''.join([x[0:shrink_keep].title() if len(x) > shrink_keep else x
-                        for x in components]) + components[-1].title()
+                        for x in components[:-1]]) + components[-1].title()
     else:
         return ''.join(x.title() for x in components)
 
