@@ -18,7 +18,7 @@ template:
   base: >
     echo command {curl} [bracket] {_datetime} {_name} {_output}
   replace: >
-    echo command [alias-replace] "{'temp-temp': {temp-temp}}"
+    echo command [alias-replace] "{'temp-temp': {temp-temp}}" {_output}
   remap: >
     echo command [alias_remap]
   pack: >

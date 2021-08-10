@@ -88,7 +88,7 @@ def snake2camel(snake_str, shrink_keep=0):
         components = components[0].split('_')
     if shrink_keep:
         return ''.join([x[0:shrink_keep].title() if len(x) > shrink_keep else x
-                        for x in components[:-1]]) + components[-1].title()
+                        for x in components]) + components[-1].title()
     else:
         return ''.join(x.title() for x in components)
 
@@ -100,13 +100,10 @@ def entry2str(name, value, str_maxlen, no_shrink_dir=False):
             value = os.path.basename(value)
         else:
             # avoid directory split when used as directory name
-            value = re.sub("^[/.]*", "", value)
+            value = re.sub("^[/.]*", "", value)  # avoid leading "." and "/"
             value = re.sub("/", "_", value)
         if len(value) > str_maxlen:
             value = value[-str_maxlen:]
-        if re.findall(r"\s", value):
-            # avoid trimming off white spaces which are part of the string value
-            value = repr(value)
     elif isinstance(value, bool):
         if value:
             value = "T"
@@ -127,6 +124,22 @@ def param_dict2name(param, str_maxlen, no_shrink_dir=False):
     return name
 
 
+def value2arg(value):
+    if isinstance(value, (list, tuple)):
+        values = value
+    else:
+        values = [value]
+    command_strs = []
+    for value in values:
+        if isinstance(value, str):
+            command_strs.append(shlex.quote(value))
+        elif isinstance(value, (int, float)):
+            command_strs.append(str(value))
+        else:
+            raise ValueError("cmd value {} is not a str, int or float.".format(repr(value)))
+    return " ".join(command_strs)
+
+
 # dict to command line options
 def param_dict2command_args(param_dict, bool_as_flag=True):
     args = []
@@ -135,11 +148,8 @@ def param_dict2command_args(param_dict, bool_as_flag=True):
         if bool_as_flag and isinstance(value, bool):
             if value:
                 flags.append('--{}'.format(key))
-        elif isinstance(value, str):
-            # as we are building a shell command, shell escapes should be taken care of.
-            args.append(shlex.join(["--{}".format(key), value]))
         else:
-            args.append('--{} {}'.format(key, value))
+            args.append("--{} {}".format(key, value2arg(value)))
     return ' ' + ' '.join(flags + args) + ' '
 
 
@@ -157,11 +167,13 @@ def json_dump(d, filename, sort_keys=True, indent=4):
 def color_print(str, color):
     print(color + str + "\x1b[0m")
 
+
 def float_trunc(x, significant=2):
     if x > 1:
         return float(format(x, '.{}f'.format(significant)))
     else:
         return float(format(x, '.{}g'.format(significant)))
+
 
 def glob_output(output="output", pattern="*"):
     paths = [path for path in glob.glob(os.path.join(output, pattern)) if os.path.isdir(path)]
@@ -178,7 +190,10 @@ def latest_log(command, path, index=-1):
 
 
 def load_params(path):
-    with open(os.path.join(path, "param.json"), "r", encoding="utf-8") as fin:
+    param_path = os.path.join(path, "param.json")
+    if not os.path.exists(param_path):
+        return None
+    with open(param_path, "r", encoding="utf-8") as fin:
         params = json.load(fin)
     return params
 
@@ -274,6 +289,10 @@ class Examiner(object):
         if exam_keys is None:
             exam_keys = self.exams.keys()
         for path in glob_output(output, pattern):
+            params = load_params(path)
+            if params is None:
+                print("No 'params.yaml' found, skip {}".format(path))
+                continue
             exp = os.path.basename(path)
             if verbose:
                 print(exp)
@@ -281,7 +300,7 @@ class Examiner(object):
                 experiment = self.experiments[exp]
             else:
                 experiment = Experiment(cache={}, metric={}, param={})
-            experiment.param.update(load_params(path))
+            experiment.param.update(params)
             for exam_key in exam_keys:
                 self.exams[exam_key](path, experiment, self.caches)
             self.experiments[exp] = experiment

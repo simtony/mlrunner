@@ -12,7 +12,8 @@ import sys
 import os
 import shutil
 from datetime import datetime
-from runner.utils import param_dict2name, param_dict2command_args, json_load, json_dump, color_print, RED, GREEN
+from runner.utils import param_dict2name, param_dict2command_args, value2arg, \
+    json_load, json_dump, color_print, RED, GREEN
 
 
 def run(coro):
@@ -115,7 +116,7 @@ def build_tasks(args):
         if "_title" in choice:
             del choice["_title"]
     # build task commands and de-duplication
-    datetime_str = datetime.now().strftime("%Y-%m-%d.%H:%M:%S")
+    datetime_str = datetime.now().strftime("%Y-%m-%d.%H_%M_%S")
     orphan_param_keys = set()  # track params not consumed by any command.
     uniq_param_dicts = []  # avoid duplication
     tasks = []
@@ -164,7 +165,7 @@ def build_tasks(args):
         if args.no_param_dir:
             param_dict["_output"] = args.output
         else:
-            param_dict["_output"] = os.path.join(args.output, name)
+            param_dict["_output"] = os.path.join(args.output, param_dict["_name"])
         param_dict["_datetime"] = datetime_str
 
         # prepare command
@@ -181,8 +182,7 @@ def build_tasks(args):
                 if param in param_keys:
                     param_keys.remove(param)
                 if param in param_dict:
-                    s = str(param_dict[param])
-                    command = command.replace(curly_param, s)
+                    command = command.replace(curly_param, value2arg(param_dict[param]))
                 else:
                     empty_params.append(curly_param)
 
@@ -210,14 +210,14 @@ def build_tasks(args):
                 log_file = "log.{}.{}.{}".format(name, param_dict["_datetime"], param_dict["_name"])
             else:
                 log_file = "log.{}.{}".format(name, param_dict["_datetime"])
-            log_path = os.path.join(param_dict["_output"], log_file)
+            log_path = value2arg(os.path.join(param_dict["_output"], log_file))
 
             if args.debug:
                 # log_path may contain tokens that should be excaped in shell.
                 # os.makedirs implicitly handle it, here we should handle it explicitly.
-                suffix = "2>&1 | tee {}".format(shlex.quote(log_path)) + "; exit ${PIPESTATUS[0]}"
+                suffix = "2>&1 | tee {}".format(log_path) + "; exit ${PIPESTATUS[0]}"
             else:
-                suffix = "> {} 2>&1".format(shlex.quote(log_path))
+                suffix = "> {} 2>&1".format(log_path)
 
             name2command[name] = command + " " + suffix
         orphan_param_keys.update(param_keys)
@@ -264,7 +264,7 @@ async def build_worker(tasks, queue, stats, resource):
         json_dump(o_param_dict, param_path)
 
         for key, command in name2command.items():
-            info = "{:5}:{:2d}/{:2d}, {}".format(key, index + 1, queue.maxsize, param_dict["_output"])
+            info = "{:5}:{:2d}/{:2d}, {}".format(key, index + 1, queue.maxsize, value2arg(param_dict["_output"]))
             if stat[key]["code"] == 0:
                 print("SKIP " + info)
                 continue
