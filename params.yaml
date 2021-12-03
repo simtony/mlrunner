@@ -1,90 +1,67 @@
-# Configuration section.
 # "template" and "resource" are required.
 ---
 # Command templates.
-# {param} to replace by value: {param} -> value
-# [param] to replace by key and value: [param] -> --key value
+# ${param} is replaced by value: {param} -> value
+# if the value has boolean value, replaced by the flag: {param} -> --param
+
 # only "snake-param" or "snake_param" are valid.
-# [param]: matched by r"\[[\w\-\_]+?\]"
-# {param}: matched by r"{[\w\-\_]+?}"
+# ${param}: matched by r"${[\w\-\_]+?}"
 
-# param not specified with either {param} and [param], but appearing in param choice will only
-# affect {_name} and {_output}
+# param not specified with ${param} or alias, but appearing in param choice will only
+# affect ${_name} and ${_output}. This is used to avoid overriding existing results.
+
 # reserved params:
-# {_name}: name of param choices
-# {_output}: /{--output}/{_name}
-# {_datetime}: current date&time
+# ${_name}: name of param choices
+# ${_output}: /output_dir/${_name}
+# ${_time}: current date&time
+
+# Command templates with params to be filled
 template:
-  base: >
-    echo command {curl} [bracket] {_datetime} {_name} {_output}
-  replace: >
-    echo command [alias-replace] "{'temp-temp': {temp-temp}}" {_output}
-  remap: >
-    echo command [alias_remap]
-  pack: >
-    echo command {curl} [bracket]
+  dtype: >
+    echo command {param1} {param2} "{'param3': {param3}}" {param4}
+  reserved: >
+    echo command {_time} {_name} {_output}
+  dummy: >
+    echo command {param1} {param2}
+  alias: >
+    echo command {param1} {param2}
 
-# replace param to group of new params.
-# Applicable only for [param]s
+# Fill in values to a group of params specified in the command.
+# Useful when a setting involves various params to tweak.
+# Alias params should not be specified in command.
 alias:
-  # alias_replace=1 will results in alias_replaced1=alias_replaced2=1
-  alias-replace: [ alias_replaced1, alias_replaced2 ]
-
-  # alias_remap=remap1 will be replaced as alias_remap_new_bracket1=1, remap_new_bracket2=2
-  alias_remap: # remap
-    remap1: { alias_remap_new_bracket1: 1, alias_remap_new_bracket2: 2 }
-
-# fill in values to group of params specified in the command.
-# pack params(in this example, pack_replace and pack_remap) should not be specified in command.
-pack: # pack
-  # pack_replace=1 will results in curl=bracket=1
-  pack_replace: [ curl, bracket ]
-  # pack_remap=remap1 will be replaced as curl=1, bracket=2
-  pack_remap:
-    remap1: { curl: 1, bracket: 2 }
-
+  alias:
+    case1: { param1: 1, param2: "1" }
+    case2: { param1: 2, param2: "2" }
 
 default:
-  curl: 0
-  bracket: 0
-  alias-replace: 1
-  alias_remap: remap1
-  temp-temp: 1000
+  param1: 1
+  param2: "adsf"
+  param3: 1.3
+  param4: False
 
 
-# gpu indices to be filled in CUDA_VISIBLE_DEVICES={}. each resource is assigned to a worker.
-# for multi-gpu tasks, simply set [ "1,2", "3,4" ]
-# a single resource can be assigned multiple times, typically when your task requires a very low gpu utilization
-# [ "1", "2", "3", "1", "2", "3" ]
+# GPU indices to be filled in CUDA_VISIBLE_DEVICES={}, each corresponds to a worker.
+# For multi-gpu tasks, simply set [ "1,2", "3,4" ]. the same resource can be assigned multiple times,
+# typically when your task requires a very low gpu utilization, e.g. [ "1", "2", "3", "1", "2", "3" ].
 resource: [ "1" , "2" ]
 
-# list all possible choices here, model_tuner.py will sweep all possible combinations.
+# List all possible choices here, `run` will sweep all possible combinations.
 ---
-_title: base
-curl: [ "1 " ]
-bracket: [ "1 " ]
+_title: dtype # -t <title> will run choices with _title==<title>
+_cmd: [ dtype, reserved ] # which command in the template to run, overrode by --command
+param1: [ 10 ]
+param2: [ "{'a': 'b'} " ] # place quote to protect white spaces
+param3: [ 3.1415 ]
+param4: [ True ] # will be converted into flag "--param4"
 
 ---
-_title: missed
-curl: [ "1" ]
+_title: dummy
+_cmd: [ dummy ]
+dummy: [ 1 ] # only affects the directory name
+
 
 ---
-_title: missed_and_dummy
-dummy: [ 1 ]
-
----
-_title: replace
-# place quote to protect white spaces
-alias-replace: [ "{'a': 'b'} " ]
-
----
-_title: remap
-remap: [ remap1 ]
-
----
-_title: pack_replace
-pack_replace: [ "1 " ]
-
----
-_title: pack_remap
-pack_remap: [ remap1 ]
+_title: alias
+_cmd: [ alias ]
+alias: [ case2 ] # assign the group of case2: { param1=2, param2="2" }

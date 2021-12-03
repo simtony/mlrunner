@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import argparse
-import yaml
 import random
 import itertools
 import shlex
@@ -12,16 +11,17 @@ import sys
 import os
 import shutil
 from datetime import datetime
-from runner.utils import param_dict2name, param_dict2command_args, value2arg, \
-    json_load, json_dump, color_print, RED, GREEN
+from runner.utils.misc import spec2name, get_shell_arg, shell_arg, \
+    json_load, json_dump, color_print
+from runner.utils.config import load_yaml, InvalidYAMLException
+
+TIME = datetime.now().strftime("%Y%m%d.%H%M%S")
 
 
 def run(coro):
     if sys.version_info >= (3, 7):
         return asyncio.run(coro)
-
     # Emulate asyncio.run() on older versions
-
     # asyncio.run() requires a coroutine, so require it here as well
     if not isinstance(coro, types.CoroutineType):
         raise TypeError("run() requires a coroutine object")
@@ -38,7 +38,8 @@ def run(coro):
 def sweep(param2choices, num_sample=None):
     # random combination of param choices
     for key, values in param2choices.items():
-        assert isinstance(values, list), "{} should be a list, not {}".format(key, type(values))
+        if not isinstance(values, list):
+            raise InvalidYAMLException("{} should be a list, not {}".format(key, type(values)))
 
     param_choices = [[(key, value) for value in values] for key, values in param2choices.items()]
     cand_params = [list(param) for param in itertools.product(*param_choices)]
@@ -52,249 +53,187 @@ def sweep(param2choices, num_sample=None):
     return param_dicts
 
 
-def build_tasks(args):
-    # parse yaml file
-    with open(args.yaml, "r") as fin:
-        docs = list(yaml.load_all(fin, Loader=yaml.FullLoader))
-    assert len(docs) > 1, "Empty yaml file."
-    config = docs[0]  # first doc for meta data
-    if args.resource:
-        print("Override resource to {}".format(repr(args.resource)))
-        config["resource"] = args.resource
+# param_dict updates
+def update_alias(param_dict, aliases):
+    def resolve_alias(key, value):
+        if key not in aliases:
+            raise InvalidYAMLException("{} not in 'alias'.")
+        # aliases[key] already asserted as a dict
+        if value not in aliases[key]:
+            raise InvalidYAMLException("value of '{}' should be one of {}".format(key, tuple(aliases[key].keys())))
+        return aliases[key][value]
 
-    def safe_load(key, data_type, required=False):
-        value = data_type()
-        if required:
-            assert key in config, "Invalid yaml format: '{}' should be in the first doc.".format(key)
-        if key in config:
-            value = config[key]
-            if value:
-                assert isinstance(value, data_type), \
-                    "Invalid yaml format: '{}' should be a {}.".format(key, data_type)
-        return value
+    update_dict = dict()
+    alias_param = set()
+    for param, value in param_dict.items():
+        if param in aliases:
+            alias_param.add(param)
+            update_dict.update(resolve_alias(param, value))
+    for param in alias_param:
+        del param_dict[param]
+    param_dict.update(update_dict)
 
-    name2template = safe_load("template", dict, required=True)
-    assert name2template, "No command templates."
-    if args.command:
-        for command in args.command:
-            assert command in name2template, \
-                "command={} is not in valid commands {}".format(command,
-                                                                tuple(name2template.keys()))
-        color_print("Run selected commands: {}".format(args.command), GREEN)
-    resources = [str(i) for i in safe_load("resource", list, required=True)]
-    defaults = safe_load("default", dict)
-    aliases = safe_load("alias", dict)
-    packs = safe_load("pack", dict)
-    if aliases:
-        for key, value in aliases.items():
-            assert isinstance(value, (list, dict)), \
-                "Invalid yaml format: '{}' in 'alias' should be a list or dict.".format(key)
-    if packs:
-        for key, value in aliases.items():
-            assert isinstance(value, (list, dict)), \
-                "Invalid yaml format: '{}' in 'pack' should be a list or dict.".format(key)
 
-    choices = docs[1:]  # first doc for meta data
-    assert len(choices) > 0, "Invalid yaml format: no param choices available."
-    if args.title is not None:
-        is_title_unset = True
-        is_title_not_exist = True
-        temp_choices = []
-        for choice in choices:
-            if "_title" in choice:
-                is_title_unset = False
-                if choice["_title"] == args.title:
-                    is_title_not_exist = False
-                    temp_choices.append(choice)
-        choices = temp_choices
-        assert not is_title_unset, "'_title' not in any param choices"
-        assert not is_title_not_exist, "No param choices having '_title'={}".format(args.title)
-        color_print("Run param choices with title '{}'".format(args.title), GREEN)
-        color_print(yaml.dump_all(choices, default_flow_style=True, explicit_start=True), GREEN)
+def update_missing(param_dict, defaults):
+    for param, value in defaults.items():
+        if param not in param_dict:
+            param_dict[param] = value
 
-    for choice in choices:
-        if "_title" in choice:
-            del choice["_title"]
-    # build task commands and de-duplication
-    datetime_str = datetime.now().strftime("%Y-%m-%d.%H_%M_%S")
-    orphan_param_keys = set()  # track params not consumed by any command.
-    uniq_param_dicts = []  # avoid duplication
+
+def parse_choice(args, choice, aliases, defaults):
+    # update commands
+    if "_cmd" in choice:
+        commands = choice["_cmd"]
+        del choice["_cmd"]
+    else:
+        commands = None
+    entries = []
+    for spec in sweep(choice, num_sample=args.sample):
+        name = spec2name(spec, str_maxlen=100)
+        meta = {
+            "_name":   name,
+            "_time":   TIME,
+            "_output": args.output if args.no_subdir else os.path.join(args.output, name)
+        }
+        update_alias(spec, aliases)
+        update_missing(spec, defaults)
+        entries.append((spec, meta))
+    return commands, entries
+
+
+def build_tasks(args, templates, aliases, defaults, choices):
+    def unique_entries(entries):
+        for spec, meta in entries:
+            if spec not in unique_entries.unique:
+                unique_entries.unique.append(copy.deepcopy(spec))
+                yield spec, meta
+
+    unique_entries.unique = []
+
     tasks = []
     stats = dict()
-
-    def get_pack_or_alias(key, value, packs_or_aliases):
-        assert key in packs_or_aliases
-        if isinstance(packs_or_aliases[key], list):
-            # param replacement
-            return {new_key: value for new_key in packs_or_aliases[key]}
-        if isinstance(packs_or_aliases[key], dict):
-            # param remap
-            assert value in packs_or_aliases[key], \
-                "value of '{}' should be in {}".format(key, tuple(packs_or_aliases[key].keys()))
-            return packs_or_aliases[key][value]
-
-    for param_dict in itertools.chain.from_iterable(sweep(choice, num_sample=args.sample) for choice in choices):
-        # get name before messing up with param_dict
-        name = param_dict2name(param_dict, str_maxlen=100, no_shrink_dir=args.no_shrink_dir)
-
-        # update with packed params
-        pack_update_dict = dict()
-        pack_param = set()
-        for param, value in param_dict.items():
-            if param in packs:
-                pack_param.add(param)
-                pack_update_dict.update(get_pack_or_alias(param, value, packs))
-        for param in pack_param:
-            del param_dict[param]
-        param_dict.update(pack_update_dict)
-
-        # update missing with default
-        for param, value in defaults.items():
-            if param not in param_dict:
-                param_dict[param] = value
-
-        # deduplication
-        if param_dict in uniq_param_dicts:
-            continue
-        else:
-            uniq_param_dicts.append(copy.deepcopy(param_dict))
-
-        param_keys = set(param_dict.keys())
-        # filling builtin params
-        param_dict["_name"] = name
-        if args.no_param_dir:
-            param_dict["_output"] = args.output
-        else:
-            param_dict["_output"] = os.path.join(args.output, param_dict["_name"])
-        param_dict["_datetime"] = datetime_str
-
-        # prepare command
-        name2command = {}
-        for name, command_template in name2template.items():
-            if args.command is not None and name not in args.command:
-                continue
-            empty_params = []
-            command = command_template
-            # fill in curly params
-            for curly_param in re.findall(r"{[\w\-\_]+?}", command):
-                param = curly_param.strip("{}")
-                assert param not in packs, "Packed param '{}' should not be specified in command.".format(param)
-                if param in param_keys:
-                    param_keys.remove(param)
-                if param in param_dict:
-                    command = command.replace(curly_param, value2arg(param_dict[param]))
-                else:
-                    empty_params.append(curly_param)
-
-            # fill in square params and perform param remap
-            for square_param in re.findall(r"\[[\w\-\_]+?\]", command):
-                param = square_param.strip("[]")
-                assert param not in packs, "Packed param '{}' should not be specified in command.".format(param)
-                if param in param_keys:
-                    param_keys.remove(param)
-                if param in param_dict:
+    orphans = set()  # track params not consumed by any command
+    for choice in choices:
+        commands, entries = parse_choice(args, choice, aliases, defaults)
+        if args.command:
+            commands = args.command
+        for spec, meta in unique_entries(entries):
+            unused_params = set(spec.keys())  # to check orphans params
+            spec.update(meta)
+            scripts = {}
+            for command, template in templates.items():
+                if commands and command not in commands:
+                    continue
+                # fill placeholder with params
+                empties = []
+                for placeholder in re.findall(r"{[\w\-\_]+?}", template):
+                    param = placeholder.strip("{}")
                     if param in aliases:
-                        s = param_dict2command_args(get_pack_or_alias(param, param_dict[param], aliases),
-                                                    bool_as_flag=True)
+                        raise InvalidYAMLException(
+                                "alias param '{}' should not be specified in template.".format(param))
+                    if param in unused_params:
+                        unused_params.remove(param)
+                    if param in spec:
+                        template = template.replace(placeholder, get_shell_arg(spec, param))
                     else:
-                        s = param_dict2command_args({param: param_dict[param]}, bool_as_flag=True)
-                    command = command.replace(square_param, s)
+                        empties.append(placeholder)
+                if empties:
+                    raise InvalidYAMLException("params {} are not specified in 'default' or 'choice'".format(empties))
+                template = " ".join(template.split())  # clear messed spaces
+
+                # prepare suffix
+                if args.no_subdir:
+                    log = "log.{}.{}.{}".format(command, spec["_time"], spec["_name"])
                 else:
-                    empty_params.append(square_param)
+                    log = "log.{}.{}".format(command, spec["_time"])
+                log = shell_arg(os.path.join(spec["_output"], log))
 
-            assert not empty_params, "params {} are not specified in 'default' or 'param_choice'".format(empty_params)
-            command = " ".join(command.split())  # clear messed spaces
+                if args.debug:
+                    # log_path may contain tokens that should be escaped in shell.
+                    # os.makedirs implicitly handle it, here we should handle it explicitly.
+                    suffix = "2>&1 | tee {}".format(log) + "; exit ${PIPESTATUS[0]}"
+                else:
+                    suffix = "> {} 2>&1".format(log)
+                scripts[command] = template + " " + suffix
 
-            # extra params for logging
-            if args.no_param_dir:
-                log_file = "log.{}.{}.{}".format(name, param_dict["_datetime"], param_dict["_name"])
-            else:
-                log_file = "log.{}.{}".format(name, param_dict["_datetime"])
-            log_path = value2arg(os.path.join(param_dict["_output"], log_file))
+            orphans.update(unused_params)
+            # use stat to avoid reruns.
+            stat = {key: {"code": -1} for key in scripts.keys()}
+            if not args.force:
+                stat_path = os.path.join(spec["_output"], "stat.json")
+                if os.path.exists(stat_path):
+                    prev_stat = json_load(stat_path)
+                    for key in stat.keys():
+                        if key in prev_stat and prev_stat[key]["code"] == 0:
+                            stat[key]["code"] = 0
 
-            if args.debug:
-                # log_path may contain tokens that should be excaped in shell.
-                # os.makedirs implicitly handle it, here we should handle it explicitly.
-                suffix = "2>&1 | tee {}".format(log_path) + "; exit ${PIPESTATUS[0]}"
-            else:
-                suffix = "> {} 2>&1".format(log_path)
+            tasks.append({"spec": spec, "scripts": scripts})
+            stats[spec["_name"]] = stat
+    color_print("Orphan params: {}".format(orphans), "red")
 
-            name2command[name] = command + " " + suffix
-        orphan_param_keys.update(param_keys)
-        stat = {key: {"code": -1} for key in name2command.keys()}
-        if not args.force:
-            stat_path = os.path.join(param_dict["_output"], "stat.json")
-            if os.path.exists(stat_path):
-                o_stat = json_load(stat_path)
-                for key in stat.keys():
-                    if key in o_stat and o_stat[key]["code"] == 0:
-                        stat[key]["code"] = 0
-        tasks.append(dict(param=param_dict, command=name2command))
-        stats[param_dict["_name"]] = stat
     if args.debug:
         tasks = tasks[:1]
-        stats = {tasks[0]["param"]["_name"]: {key: {"code": -1} for key in tasks[0]["command"].keys()}}
-    return resources, tasks, stats, orphan_param_keys
+        stats = {tasks[0]["spec"]["_name"]: {key: {"code": -1} for key in tasks[0]["scripts"].keys()}}
+    return tasks, stats
 
 
 async def build_worker(tasks, queue, stats, resource):
     while True:
         index = await queue.get()
-        param_dict = tasks[index]["param"]
-        name2command = tasks[index]["command"]
-        stat = stats[param_dict["_name"]]
+        spec, scripts = tasks[index]["spec"], tasks[index]["scripts"]
+        stat = stats[spec["_name"]]
         prefix = "CUDA_VISIBLE_DEVICES={}".format(resource)
-        os.makedirs(param_dict["_output"], exist_ok=True)
-        for key, command in name2command.items():
-            name2command[key] = " ".join([prefix, command])
-        param_dict["_commands"] = name2command
+        os.makedirs(spec["_output"], exist_ok=True)
+        for command, script in scripts.items():
+            scripts[command] = " ".join([prefix, script])
+        spec["_scripts"] = scripts
 
         # dump param into json
-        param_path = os.path.join(param_dict["_output"], "param.json")
-        if os.path.exists(param_path):
-            o_param_dict = json_load(param_path)
-            for key, value in param_dict.items():
+        spec_path = os.path.join(spec["_output"], "param.json")
+        if os.path.exists(spec_path):
+            prev_spec = json_load(spec_path)
+            for key, value in spec.items():
                 # don't overwrite old commands
-                if key == "_commands":
-                    o_param_dict[key].update(param_dict[key])
+                if key == "_scripts":
+                    prev_spec[key].update(spec[key])
                 else:
-                    o_param_dict[key] = param_dict[key]
+                    prev_spec[key] = spec[key]
         else:
-            o_param_dict = param_dict
-        json_dump(o_param_dict, param_path)
+            prev_spec = spec
+        json_dump(prev_spec, spec_path)
 
-        for key, command in name2command.items():
-            info = "{:5}:{:2d}/{:2d}, {}".format(key, index + 1, queue.maxsize, value2arg(param_dict["_output"]))
-            if stat[key]["code"] == 0:
+        for command, script in scripts.items():
+            info = "{:5}:{:2d}/{:2d}, {}".format(command, index + 1, queue.maxsize, shell_arg(spec["_output"]))
+            if stat[command]["code"] == 0:
                 print("SKIP " + info)
                 continue
-            stat[key]["gpu"] = resource
+            stat[command]["gpu"] = resource
 
-            process = await asyncio.create_subprocess_shell(command, executable='/bin/bash')
+            process = await asyncio.create_subprocess_shell(script, executable='/bin/bash')
             info = "gpu: {}, ".format(resource) + info
             print("START   " + info)
             await process.wait()
 
-            returncode = process.returncode
-            stat_path = os.path.join(param_dict["_output"], "stat.json")
+            code = process.returncode
+            stat_path = os.path.join(spec["_output"], "stat.json")
             if os.path.exists(stat_path):
-                o_stat = json_load(stat_path)
-                o_stat.update(stat)
+                out_stat = json_load(stat_path)
+                out_stat.update(stat)
             else:
-                o_stat = stat
+                out_stat = stat
             try:
-                if returncode != 0:
-                    stats[param_dict["_name"]][key]["code"] = 1
-                    o_stat[key]["code"] = 1
-                    color_print("FAIL    " + info, RED)
+                if code != 0:
+                    stats[spec["_name"]][command]["code"] = 1
+                    out_stat[command]["code"] = 1
+                    color_print("FAIL    " + info, "red")
                     break
                 else:
-                    stats[param_dict["_name"]][key]["code"] = 0
-                    o_stat[key]["code"] = 0
-                    color_print("SUCCEED " + info, GREEN)
+                    stats[spec["_name"]][command]["code"] = 0
+                    out_stat[command]["code"] = 0
+                    color_print("SUCCEED " + info, "green")
             except Exception as e:
                 print(e, type(e))
-            json_dump(o_stat, stat_path, indent=None)
+            json_dump(out_stat, stat_path, indent=None)
         queue.task_done()
 
 
@@ -325,11 +264,11 @@ async def run_all(tasks, stats, resources):
                 break
 
     if failed:
-        color_print("Failed tasks: %d/%d" % (len(failed), len(tasks)), RED)
+        color_print("Failed tasks: %d/%d" % (len(failed), len(tasks)), "red")
         for name in failed:
-            color_print('    {}'.format(name), RED)
+            color_print('    {}'.format(name), "red")
     else:
-        color_print("No task failed.", GREEN)
+        color_print("No task failed.", "green")
 
 
 def main():
@@ -350,15 +289,14 @@ def main():
 
     parser.add_argument("--sample", default=None, type=int,
                         help="number of random samples from each param choice, by default all params choices are ran")
-    parser.add_argument("--no-param-dir", default=False, action="store_true",
-                        help="do not create separated output directory for each param choice")
-    parser.add_argument("--no-shrink-dir", default=False, action="store_true",
-                        help="do not eliminate directory of directory params")
+    parser.add_argument("--no-subdir", default=False, action="store_true",
+                        help="do not create separated directory for each param choice")
 
     args = parser.parse_args()
-    resources, tasks, stats, orphans = build_tasks(args)
-    color_print("Orphan params: {}".format(orphans), RED)
+    resources, templates, aliases, defaults, choices = load_yaml(args)
+    tasks, stats = build_tasks(args, templates, aliases, defaults, choices)
+
     os.makedirs(args.output, exist_ok=True)
-    shutil.copyfile(args.yaml,
-                    os.path.join(args.output, args.yaml if args.title is None else args.yaml + "." + args.title))
+    yaml_bak_path = os.path.join(args.output, args.yaml if args.title is None else args.yaml + "." + args.title)
+    shutil.copyfile(args.yaml, yaml_bak_path)
     run(run_all(tasks, stats, resources))

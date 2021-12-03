@@ -2,11 +2,11 @@ import setuptools
 
 setuptools.setup(
         name='runner',
-        version='0.5.2',
+        version='0.5.3',
         author='Tony Ou',
         author_email='simtony2@gmail.com',
         url='https://github.com/simtony/runner',
-        description="A light-weight script for launching large number of experiments.",
+        description="A light-weight script for gpu experiments.",
         classifiers=[
             "Programming Language :: Python :: 3",
             "License :: OSI Approved :: MIT License",
