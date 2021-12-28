@@ -2,7 +2,7 @@
 ---
 # Command templates.
 # ${param} is replaced by value: {param} -> value
-# if the value has boolean value, replaced by the flag: {param} -> --param
+# if the value has boolean value, replaced by flag: {param} -> --param
 
 # only "snake-param" or "snake_param" are valid.
 # ${param}: matched by r"${[\w\-\_]+?}"

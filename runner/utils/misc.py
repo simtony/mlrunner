@@ -128,7 +128,6 @@ def shell_arg(value):
 
 def get_shell_arg(spec, param, bool_as_flag=True):
     value = spec[param]
-    print(repr(value))
     if bool_as_flag and isinstance(value, bool):
         if value:
             return '--{}'.format(param)
