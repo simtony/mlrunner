@@ -102,13 +102,19 @@ def parse_choice(args, choice, aliases, defaults):
 
 
 def build_tasks(args, templates, aliases, defaults, choices):
-    def unique_entries(entries):
+    def uniq_entries(entries):
         for spec, meta in entries:
-            if spec not in unique_entries.unique:
-                unique_entries.unique.append(copy.deepcopy(spec))
-                yield spec, meta
-
-    unique_entries.unique = []
+            if spec in uniq_entries.uniq_spec:
+                # allow the same task with different command.
+                # will skip repeated commands with stat.json
+                if meta["_output"] not in uniq_entries.uniq_output:
+                    continue
+            else:
+                uniq_entries.uniq_spec.append(copy.deepcopy(spec))
+                uniq_entries.uniq_output.append(meta["_output"])
+            yield spec, meta
+    uniq_entries.uniq_spec = []
+    uniq_entries.uniq_output = []
 
     tasks = []
     stats = dict()
@@ -117,7 +123,9 @@ def build_tasks(args, templates, aliases, defaults, choices):
         commands, entries = parse_choice(args, choice, aliases, defaults)
         if args.command:
             commands = args.command
-        for spec, meta in unique_entries(entries):
+        if not args.no_deduplication:
+            entries = uniq_entries(entries)
+        for spec, meta in entries:
             unused_params = set(spec.keys())  # to check orphans params
             spec.update(meta)
             scripts = {}
@@ -177,7 +185,7 @@ def build_tasks(args, templates, aliases, defaults, choices):
     return tasks, stats
 
 
-async def build_worker(tasks, queue, stats, resource):
+async def build_worker(tasks, queue, stats, resource, verbose=True):
     while True:
         index = await queue.get()
         spec, scripts = tasks[index]["spec"], tasks[index]["scripts"]
@@ -230,14 +238,15 @@ async def build_worker(tasks, queue, stats, resource):
                 else:
                     stats[spec["_name"]][command]["code"] = 0
                     out_stat[command]["code"] = 0
-                    color_print("SUCCEED " + info, "green")
+                    if verbose:
+                        color_print("SUCCEED " + info, "green")
             except Exception as e:
                 print(e, type(e))
             json_dump(out_stat, stat_path, indent=None)
         queue.task_done()
 
 
-async def run_all(tasks, stats, resources):
+async def run_all(args, tasks, stats, resources):
     # populate the task queue
     task_num = len(tasks)
     cmd_num = sum(sum(v["code"] != 0 for v in stat.values()) for stat in stats.values())
@@ -250,7 +259,7 @@ async def run_all(tasks, stats, resources):
     workers = []
     loop = asyncio.get_event_loop()
     for resource in resources:
-        workers.append(loop.create_task(build_worker(tasks, queue, stats, resource)))
+        workers.append(loop.create_task(build_worker(tasks, queue, stats, resource, verbose=args.verbose)))
     await queue.join()
 
     for worker in workers:
@@ -266,7 +275,7 @@ async def run_all(tasks, stats, resources):
     if failed:
         color_print("Failed tasks: %d/%d" % (len(failed), len(tasks)), "red")
         for name in failed:
-            color_print('    {}'.format(name), "red")
+            color_print('    {}'.format(os.path.join(args.output, name)), "red")
     else:
         color_print("No task failed.", "green")
 
@@ -283,14 +292,17 @@ def main():
                         help="choose which command to run, by default run all commands")
     parser.add_argument("-f", "--force", default=False, action="store_true",
                         help="whether to overwrite tasks successfully ran")
+    parser.add_argument("-v", "--verbose", default=False, action="store_true",
+                        help="whether to print success tasks")
     parser.add_argument("-r", "--resource", default="", nargs="+",
                         help="override resources in params.yaml with a space separate list, "
                              "for example `-r 1,2 3,4` gives ['1,2', '3,4']")
-
     parser.add_argument("--sample", default=None, type=int,
                         help="number of random samples from each param choice, by default all params choices are ran")
     parser.add_argument("--no-subdir", default=False, action="store_true",
                         help="do not create separated directory for each param choice")
+    parser.add_argument("--no-deduplication", default=False, action="store_true",
+                        help="do not remove task with the same params but different output dir")
 
     args = parser.parse_args()
     resources, templates, aliases, defaults, choices = load_yaml(args)
@@ -299,4 +311,4 @@ def main():
     os.makedirs(args.output, exist_ok=True)
     yaml_bak_path = os.path.join(args.output, args.yaml if args.title is None else args.yaml + "." + args.title)
     shutil.copyfile(args.yaml, yaml_bak_path)
-    run(run_all(tasks, stats, resources))
+    run(run_all(args, tasks, stats, resources))

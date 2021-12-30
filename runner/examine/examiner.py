@@ -81,8 +81,8 @@ class Examiner(object):
     def add(self, func):
         self.exams.add(func)
 
-    def exam(self, output="output", pattern="*", verbose=False):
-        for i, path in enumerate(glob_output(output, pattern)):
+    def exam(self, output="output", regex=".*", verbose=False):
+        for i, path in enumerate(match_output(output, regex)):
             params = load_params(path)
             if params is None:
                 print("No 'params.yaml' found, skip {}".format(path))
@@ -128,8 +128,11 @@ class Examiner(object):
         table(entries, headers, tsv)
 
 
-def glob_output(output="output", pattern="*"):
-    paths = [path for path in glob.glob(os.path.join(output, pattern)) if os.path.isdir(path)]
+def match_output(output="output", regex=".*"):
+    pattern = re.compile(regex)
+    files = [file for file in os.listdir(output) if pattern.search(file)]
+    paths = [os.path.join(output, file) for file in files]
+    paths = [path for path in paths if os.path.isdir(path)]
     return sorted(paths)
 
 
