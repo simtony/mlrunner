@@ -108,7 +108,7 @@ class Examiner(object):
                 param2values.add(k, v)
         return param2values
 
-    def table(self, tsv=True, concise=True):
+    def table(self, tsv=True, concise=True, raw=False):
         # find unique param values
         param2values = self._get_param2values()
         if concise:
@@ -126,6 +126,8 @@ class Examiner(object):
                    [experiment.metric.get(h, None) for h in metric_headers]
                    for experiment in self.experiments.values()]
         table(entries, headers, tsv)
+        if raw:
+            return entries, headers
 
 
 def match_output(output="output", regex=".*"):
