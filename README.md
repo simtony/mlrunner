@@ -2,7 +2,7 @@
 
 A light-weight tool to currently run experiments with different command line params.
 
-During a typical iteration in neural network development, we need to deal with a batch of experiments with different data, model architecture, hyperparams, training regimes and test regimes, to name a few.  I have seen two typical strategies adopted by my peers:
+During a typical iteration in neural network development, we need to deal with a batch of experiments.  I have seen two typical strategies adopted by my peers:
 1. Run them one after another by hand, and manually paste each result in a spreadsheet 
 2. Use a for loop in a bash script
 
