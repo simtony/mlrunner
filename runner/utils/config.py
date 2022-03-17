@@ -89,5 +89,6 @@ def load_yaml(args):
         print("Override resource to {}".format(repr(args.resource)))
         resources = args.resource
     resources = [str(i) for i in resources]
+    # we dub each doc specifying a grid sweep of different params a "choice"
     choices = filter_choices(args.title, docs[1:])
     return resources, templates, aliases, defaults, choices

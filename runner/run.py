@@ -11,8 +11,8 @@ import sys
 import os
 import shutil
 from datetime import datetime
-from runner.utils.misc import spec2name, get_shell_arg, shell_arg, \
-    json_load, json_dump, color_print
+from runner.utils.misc import spec2name, map_placeholder, map_replacement, shell_arg, \
+    yaml_load, yaml_dump, color_print
 from runner.utils.config import load_yaml, InvalidYAMLException
 
 TIME = datetime.now().strftime("%Y%m%d.%H%M%S")
@@ -54,7 +54,7 @@ def sweep(param2choices, num_sample=None):
 
 
 # param_dict updates
-def update_alias(param_dict, aliases):
+def map_alias(param_dict, aliases):
     def resolve_alias(key, value):
         if key not in aliases:
             raise InvalidYAMLException("{} not in 'alias'.")
@@ -74,7 +74,7 @@ def update_alias(param_dict, aliases):
     param_dict.update(update_dict)
 
 
-def update_missing(param_dict, defaults):
+def add_default(param_dict, defaults):
     for param, value in defaults.items():
         if param not in param_dict:
             param_dict[param] = value
@@ -95,8 +95,8 @@ def parse_choice(args, choice, aliases, defaults):
             "_time":   TIME,
             "_output": args.output if args.no_subdir else os.path.join(args.output, name)
         }
-        update_alias(spec, aliases)
-        update_missing(spec, defaults)
+        map_alias(spec, aliases)
+        add_default(spec, defaults)
         entries.append((spec, meta))
     return commands, entries
 
@@ -106,13 +106,14 @@ def build_tasks(args, templates, aliases, defaults, choices):
         for spec, meta in entries:
             if spec in uniq_entries.uniq_spec:
                 # allow the same task with different command.
-                # will skip repeated commands with stat.json
+                # repeated commands will be skipped later by checking stat
                 if meta["_output"] not in uniq_entries.uniq_output:
                     continue
             else:
                 uniq_entries.uniq_spec.append(copy.deepcopy(spec))
                 uniq_entries.uniq_output.append(meta["_output"])
             yield spec, meta
+
     uniq_entries.uniq_spec = []
     uniq_entries.uniq_output = []
 
@@ -122,19 +123,26 @@ def build_tasks(args, templates, aliases, defaults, choices):
     for choice in choices:
         commands, entries = parse_choice(args, choice, aliases, defaults)
         if args.command:
+            # command line option will override those in the yaml config
             commands = args.command
-        if not args.no_deduplication:
-            entries = uniq_entries(entries)
+        entries = uniq_entries(entries)
         for spec, meta in entries:
-            unused_params = set(spec.keys())  # to check orphans params
+            unused_params = set(spec.keys())  # avoid accidentally missing the param in the template
             spec.update(meta)
             scripts = {}
             for command, template in templates.items():
                 if commands and command not in commands:
                     continue
+                template = re.sub(r"\s*\n\s*", " ", template)  # clean up line breaks
                 # fill placeholder with params
-                empties = []
-                for placeholder in re.findall(r"{[\w\-\_]+?}", template):
+                empties = set()
+                placeholders = re.findall(r"{[\w\-\_]+?}", template)  # {param} -> value
+                replacements = re.findall(r"\[[\w\-\_]+?\]", template)  # [param] -> --param value
+                intersect = set(p.strip("{}") for p in placeholders) & set(r.strip("[]") for r in replacements)
+                if intersect:
+                    raise InvalidYAMLException("duplicate params in placeholder and replacement: {}".format(intersect))
+
+                for placeholder in placeholders:
                     param = placeholder.strip("{}")
                     if param in aliases:
                         raise InvalidYAMLException(
@@ -142,14 +150,25 @@ def build_tasks(args, templates, aliases, defaults, choices):
                     if param in unused_params:
                         unused_params.remove(param)
                     if param in spec:
-                        template = template.replace(placeholder, get_shell_arg(spec, param))
+                        template = template.replace(placeholder, map_placeholder(spec, param))
                     else:
-                        empties.append(placeholder)
+                        empties.add(placeholder)
+
+                for replacement in replacements:
+                    param = replacement.strip("[]")
+                    if param in aliases:
+                        raise InvalidYAMLException(
+                                "alias param '{}' should not be specified in template.".format(param))
+                    if param in unused_params:
+                        unused_params.remove(param)
+                    if param in spec:
+                        template = template.replace(replacement, map_replacement(spec, param))
+                    else:
+                        empties.add(replacement)
                 if empties:
                     raise InvalidYAMLException("params {} are not specified in 'default' or 'choice'".format(empties))
-                template = " ".join(template.split())  # clear messed spaces
 
-                # prepare suffix
+                # prepare suffix for logging
                 if args.no_subdir:
                     log = "log.{}.{}.{}".format(command, spec["_time"], spec["_name"])
                 else:
@@ -165,15 +184,15 @@ def build_tasks(args, templates, aliases, defaults, choices):
                 scripts[command] = template + " " + suffix
 
             orphans.update(unused_params)
-            # use stat to avoid reruns.
-            stat = {key: {"code": -1} for key in scripts.keys()}
+            # track state to avoid rerunning commands.
+            stat = {key: {"state": "scheduled"} for key in scripts.keys()}
             if not args.force:
-                stat_path = os.path.join(spec["_output"], "stat.json")
+                stat_path = os.path.join(spec["_output"], "stat")
                 if os.path.exists(stat_path):
-                    prev_stat = json_load(stat_path)
+                    prev_stat = yaml_load(stat_path)
                     for key in stat.keys():
-                        if key in prev_stat and prev_stat[key]["code"] == 0:
-                            stat[key]["code"] = 0
+                        if key in prev_stat and prev_stat[key]["state"] == "finished":
+                            stat[key]["state"] = "finished"
 
             tasks.append({"spec": spec, "scripts": scripts})
             stats[spec["_name"]] = stat
@@ -181,7 +200,7 @@ def build_tasks(args, templates, aliases, defaults, choices):
 
     if args.debug:
         tasks = tasks[:1]
-        stats = {tasks[0]["spec"]["_name"]: {key: {"code": -1} for key in tasks[0]["scripts"].keys()}}
+        stats = {tasks[0]["spec"]["_name"]: {key: {"state": "scheduled"} for key in tasks[0]["scripts"].keys()}}
     return tasks, stats
 
 
@@ -197,9 +216,9 @@ async def build_worker(tasks, queue, stats, resource, verbose=True):
         spec["_scripts"] = scripts
 
         # dump param into json
-        spec_path = os.path.join(spec["_output"], "param.json")
+        spec_path = os.path.join(spec["_output"], "param")
         if os.path.exists(spec_path):
-            prev_spec = json_load(spec_path)
+            prev_spec = yaml_load(spec_path)
             for key, value in spec.items():
                 # don't overwrite old commands
                 if key == "_scripts":
@@ -208,11 +227,11 @@ async def build_worker(tasks, queue, stats, resource, verbose=True):
                     prev_spec[key] = spec[key]
         else:
             prev_spec = spec
-        json_dump(prev_spec, spec_path)
+        yaml_dump(prev_spec, spec_path)
 
         for command, script in scripts.items():
-            info = "{:5}:{:2d}/{:2d}, {}".format(command, index + 1, queue.maxsize, shell_arg(spec["_output"]))
-            if stat[command]["code"] == 0:
+            info = "{:8}:{:2d}/{:2d}, {}".format(command, index + 1, queue.maxsize, shell_arg(spec["_output"]))
+            if stat[command]["state"] == "finished":
                 print("SKIP " + info)
                 continue
             stat[command]["gpu"] = resource
@@ -223,33 +242,34 @@ async def build_worker(tasks, queue, stats, resource, verbose=True):
             await process.wait()
 
             code = process.returncode
-            stat_path = os.path.join(spec["_output"], "stat.json")
+            stat_path = os.path.join(spec["_output"], "stat")
             if os.path.exists(stat_path):
-                out_stat = json_load(stat_path)
+                out_stat = yaml_load(stat_path)
                 out_stat.update(stat)
             else:
                 out_stat = stat
             try:
                 if code != 0:
-                    stats[spec["_name"]][command]["code"] = 1
-                    out_stat[command]["code"] = 1
+                    stats[spec["_name"]][command]["state"] = "failed"
+                    out_stat[command]["state"] = "failed"
                     color_print("FAIL    " + info, "red")
                     break
                 else:
-                    stats[spec["_name"]][command]["code"] = 0
-                    out_stat[command]["code"] = 0
+                    stats[spec["_name"]][command]["state"] = "finished"
+                    out_stat[command]["state"] = "finished"
                     if verbose:
                         color_print("SUCCEED " + info, "green")
             except Exception as e:
                 print(e, type(e))
-            json_dump(out_stat, stat_path, indent=None)
+            finally:
+                yaml_dump(out_stat, stat_path)
         queue.task_done()
 
 
 async def run_all(args, tasks, stats, resources):
     # populate the task queue
     task_num = len(tasks)
-    cmd_num = sum(sum(v["code"] != 0 for v in stat.values()) for stat in stats.values())
+    cmd_num = sum(sum(v["state"] != "finished" for v in stat.values()) for stat in stats.values())
     queue = asyncio.Queue(maxsize=task_num)
     for index in range(task_num):
         queue.put_nowait(index)
@@ -267,11 +287,10 @@ async def run_all(args, tasks, stats, resources):
     await asyncio.gather(*workers, return_exceptions=True)
     failed = []
     for name, stat in stats.items():
-        for code in set(info["code"] for info in stat.values()):
-            if code > 0:
+        for state in set(info["state"] for info in stat.values()):
+            if state == "failed":
                 failed.append(name)
                 break
-
     if failed:
         color_print("Failed tasks: %d/%d" % (len(failed), len(tasks)), "red")
         for name in failed:
@@ -301,8 +320,6 @@ def main():
                         help="number of random samples from each param choice, by default all params choices are ran")
     parser.add_argument("--no-subdir", default=False, action="store_true",
                         help="do not create separated directory for each param choice")
-    parser.add_argument("--no-deduplication", default=False, action="store_true",
-                        help="do not remove task with the same params but different output dir")
 
     args = parser.parse_args()
     resources, templates, aliases, defaults, choices = load_yaml(args)

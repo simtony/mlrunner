@@ -1,24 +1,28 @@
 # "template" and "resource" are required.
 ---
 # Command templates.
-# ${param} is replaced by value: {param} -> value
-# if the value has boolean value, replaced by flag: {param} -> --param
+# {param} is replaced by value: {param} -> value
+# [param] is replaced by value and flag: {param} -> --param value
+# if the value has boolean value, use [param].
+#     param=True -> "--param"
+#     param=False -> ""
 
 # only "snake-param" or "snake_param" are valid.
-# ${param}: matched by r"${[\w\-\_]+?}"
+# {param}: matched by r"{[\w\-\_]+?}"
+# [param]: matched by r"\[[\w\-\_]+?\]"
 
-# param not specified with ${param} or alias, but appearing in param choice will only
-# affect ${_name} and ${_output}. This is used to avoid overriding existing results.
+# param not specified with {param}, [param] or alias, but appearing in param choice will only
+# affect {_name} and {_output}. This is used to avoid overriding existing results.
 
 # reserved params:
-# ${_name}: name of param choices
-# ${_output}: /output_dir/${_name}
-# ${_time}: current date&time
+# {_name}: name of param choices
+# {_output}: /output_dir/{_name}
+# {_time}: current date&time
 
 # Command templates with params to be filled
 template:
   dtype: >
-    echo command {param1} {param2} "{'param3': {param3}}" {param4}
+    echo command {param1} [param2] "{'param3': {param3}}" [param4]
   reserved: >
     echo command {_time} {_name} {_output}
   dummy: >
@@ -46,10 +50,10 @@ default:
 # typically when your task requires a very low gpu utilization, e.g. [ "1", "2", "3", "1", "2", "3" ].
 resource: [ "1" , "2" ]
 
-# List all possible choices here, `run` will sweep all possible combinations.
+# List all possible parameter choices here, `run` will sweep all possible combinations.
 ---
 _title: dtype # -t <title> will run choices with _title==<title>
-_cmd: [ dtype, reserved ] # which command in the template to run, overrode by --command
+_cmd: [ dtype, reserved ] # which command in the template to run. "run --command blah" will override it.
 param1: [ 10 ]
 param2: [ "{'a': 'b'} " ] # place quote to protect white spaces
 param3: [ 3.1415 ]

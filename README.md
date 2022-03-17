@@ -1,27 +1,34 @@
 ## Introduction
 
-This is a light-weight script to run multiple experiments in parallel. It maintains a task(packaged commands to execute)
-queue and a pool of workers. Each worker is assigned with a number of gpus. Each worker pulls a task from the queue and
-run it with assigned resources IN PARALLEL.
+A light-weight tool to currently run experiments with different command line params.
 
-Each task is assigned with a short name corresponding to its parameter choice. The same name is used to specify the
-output directory.
+During a typical iteration in neural network development, we need to deal with a batch of experiments with different data, model architecture, hyperparams, training regimes and test regimes, to name a few.  I have seen two typical strategies adopted by my peers:
+1. Run them one after another by hand, and manually paste each result in a spreadsheet 
+2. Use a for loop in a bash script
 
-To specify a group of tasks to run, just define valid choices of each parameter in a yaml config file. Then the script
-will sweep all possible combinations and append them to the task queue. For large parameter space, you can use random
-samples from the sweep.
+Such strategies quickly bring frustration irrelevant to the improvements and insights we aim for:
+1. Efficiency. During early phase we experiment on small models and datasets. They are not resource hungry. Both strategy fail to fully utilize modern multi-gpu machines.
+2. Cognitive load. There are lengthy pipelines and numerous parameters to tune: data, model architecture, hyperparams, training regimes and test regimes. These knots are typically scatter in code, data or command-line args, making the process error-prone and cognitively draining.
+3. Accessibility. How to distinguish different runs in the file system while maintaining human readability? How to quickly discover insights from tens of hundreds of results? How to minimally tweak the existing code to achieve efficiency?
+4. Robustness: What if your machine is temporally down? Should you rerun all the experiments? 
 
-## Dependencies
+Over the years I have developed an effective strategy to cope with these problems which relies on this tool. In a nutshell:
+1. Pull every modification into command line args. This interface is consistent to most code base. 
+   1. For model modification, use if/else or switch/case
+   2. For datasets, specify it with directory
+   3. Others can be set as flag or params
+2. Specify the default params in a command template. Pull the params your care as variables and list the values you are interested in a configuration file. Specify the default values of these params.
+3. Use a pool of workers to concurrently run the tasks. Dump all the relevant raw data into a directory named by the (param, value) tuples -- making them human-readable. Track the training progress with tensorboard.
+4. Apply the same processing code for each run to obtain results you need, and aggregate them for visualization: tensorboard hyperparams or simply a spreadsheet.
 
+## Install
+```
+pip install git+https://github.com/simtony/runner.git
+```
+dependencies:
 ```
 python >= 3.6.X
 pyyaml
-```
-
-## Install
-
-```
-pip install git+https://github.com/simtony/runner.git
 ```
 
 ## Usage
@@ -32,152 +39,120 @@ Edit the yaml file. Then
 run
 # or
 run -o <output> -y <yaml>
-
 ```
 
-### Resources
+Use `run -h` for available command lines args. See `params.yaml` for available configurations.
 
-A minimal yaml config is
+
+## A working example
+Suppose we are interested in different normalization layers and developed a new one called "alternorm". It has a hyperparameter "momentum", similar to existing methods batchnorm. Our baseline uses powernorm. Each run involves training, checkpoint average and test with the averaged checkpoint. So we can specify the following yaml config:
 
 ```yaml
+---
 template:
-  run: python run.py {param}
+  train: >
+    python train.py data-bin/{data}
+      --seed 1
+      --criterion label_smoothed_cross_entropy
+      --arch transformer_iwslt_de_en_v2 --share-all-embeddings
+      --optimizer adam --adam-betas '(0.9,0.98)' --clip-norm 0.0
+      --dropout 0.3 --attention-dropout 0.1 --relu-dropout 0.1
+      --lr-scheduler inverse_sqrt --warmup-init-lr 1e-07 --warmup-updates 8000
+      --lr 0.0015 --min-lr 1e-09
+      --label-smoothing 0.1 --weight-decay 0.0001
+      --max-tokens 4096 
+      --save-dir {_output}
+      --tensorboard-logdir {_output}
+      --no-save-optimizer-state
+      --update-freq 1 --log-format simple --log-interval 50
+      --ddp-backend no_c10d
+      --keep-last-epochs 5 --early-stop 5
+      --norm-momentum {moment}
+      --normalization {norm}
 
-resource: [ 0, 1 ]
+  avg: >
+    python scripts/average_checkpoints.py --inputs {_output}
+      --num-epoch-checkpoints 5 --output {_output}/averaged_model.pt
 
----
-param: [ 1, 2, 3, 4 ]
-```
+  test: >
+    python generate.py data-bin/{data}
+        --max-tokens 4096 --beam 5 --lenpen 1.0 --remove-bpe
+        --path {_output}/averaged_model.pt --gen-subset test
 
-`resource` stands for gpu index, each corresponds to an instance of the task `python run.py {param}`. In this example,
-there are two gpus available and each instance is assigned with a gpu.
-`python run.py 1` and `python run.py 2` will start first, `python run.py 3` and `python run.py 4` will run afterwards.
+default:
+  data: iwslt14
+  norm: layer
+  moment: 0.1
 
-Sometimes gpu utilization is low and multiple training instance fits in to a single gpu. In this case you can
-specify `resource: [0, 1, 0, 1]` to maximize gpu utilization. In this case, all 4 instances will run at the same time.
+resource: [ 0, 1, 2, 3 ]
 
-Sometimes an instance of task consumes more than 1 gpu. In this case you can specify `resource: ["0,1", "2,3"]`.
-
-### Outputs and logs
-
-By default, logs will be redirected to `<output>/<name_of_param>/log.command.<datetime>`.
-
-If your code writes files to the disk, it is recommended to specify the output directory
-to `{_output}=<output>/<name_of_param>`, e.g., `--tensorboard_dir {_output}/tb`.
-
-If `--no-param-dir` is specified, the directory `output/<name_of_param>/` will not be created and logs will be
-redirected to `output/<name_of_param>/log.command.<datetime>.<name_of_param>`. `{_output}=<output>`. 
-
-This is useful when
-you want to process a large file in parallel. For example, suppose you have a file `text.txt` to be parsed
-with `parse.py`, which is written in single gpu. You can first split `text.txt` into `text.txt.0, text.txt.1, ...`, then
-specify `params.yaml` as
-
-```yaml
-template:
-  run: python parse.py {file}
-
-resource: [ 0, 1 ]
-
----
-file: [ text.txt.0, text.txt.1, ... ]
-```
-
-then `run -o output -y params.yaml --no-param-dir` will process all files in parallel and write the results in `output`.
-
-### Debugging and selective running
-
-By default, all param choices will be run and logs will be redirected
-to `<output>/<name_of_param>/log.command.<datetime>`. During experiment, you may want to see the console outputs without
-the bothering of `tail -f log.command`. In this case you may want to use debug mode `run -d`, which only runs the first
-param choice and prints console outputs.
-
-Commonly after debugging and testing all your code, you may want to run different experiments on different machines.
-Copy the code to each machine and then modify `params.yaml` is annoying and error prone, in this case you can
-use `-t <title>` to run param choices with different titles. For example
-
-```yaml
-template:
-  run: python parse.py {file}
-
-resource: [ 0, 1 ]
 
 ---
-_title: machine1
-file: [ text.txt.0, text.txt.1 ]
-
----
-_title: machine2
-file: [ text.txt.3, text.txt.4 ]
+norm: [ power, alter, batch ]
+moment: [ 0.1, 0.05 ]
+```
+After syncing the modified code and the yaml file to the server, we simply hit `run`. As we specify 4 workers each with only one gpu, there are 4 tasks run concurrently:
+```
+$ run
+Orphan params: set()
+Tasks: 6, commands to run: 18
+START   gpu: 0, train: 1/ 6, output/Norm_power-Moment_0.1
+START   gpu: 1, train: 2/ 6, output/Norm_alter-Moment_0.1
+START   gpu: 2, train: 3/ 6, output/Norm_batch-Moment_0.1
+START   gpu: 3, train: 4/ 6, output/Norm_power-Moment_0.1
+START   gpu: 2, avg  : 3/ 6, output/Norm_batch-Moment_0.1
+FAIL    gpu: 2, avg  : 3/ 6, output/Norm_batch-Moment_0.1
+START   gpu: 2, train: 5/ 6, output/Norm_alter-Moment_0.1
+START   gpu: 1, avg  : 2/ 6, output/Norm_alter-Moment_0.1
+START   gpu: 1, test : 2/ 6, output/Norm_alter-Moment_0.1
+START   gpu: 1, train: 6/ 6, output/Norm_batch-Moment_0.1
+START   gpu: 3, avg  : 4/ 6, output/Norm_power-Moment_0.1
+FAIL    gpu: 3, avg  : 4/ 6, output/Norm_power-Moment_0.1
+START   gpu: 2, avg  : 5/ 6, output/Norm_alter-Moment_0.1
+START   gpu: 2, test : 5/ 6, output/Norm_alter-Moment_0.1
+...
 ```
 
-then you can simply run `run -t machine1` on machine1 and `run -t machine2` on machine2.
+We use `tensorboard --host $(hostname -I | awk '{print $1}') --logdir output` to track the training progress.
 
-If multiple templates are defined, by default all of them will be run. But you may want to specify which command to run,
-for example, train once on training set but test on different test sets. You can use `-c <command>` to select which
-command to run.
-
-```yaml
-template:
-  train: python train.py {file}
-  test: python test.py {file}
-
-resource: [ 0, 1 ]
-
----
-file: [ text.txt.0, text.txt.1 ]
+After all experiments are finished, we can examine the logs for debugging:
+```
+$ ls output/Norm_power-Moment_0.1
+checkpoint51.pt
+checkpoint52.pt
+averaged_model.pt
+log.train.20220316.030151
+log.avg.20220316.030151
+log.test.20220316.030151
+param
+stat
 ```
 
-to only run test, `run -c test`.
+and start a jupyter notebook to analyze useful metrics. We provide `Examiner` as a container to iteratively apply the metric parser to all experiments and aggregate the results. In this example we simply parse the test log for the test BLEU:
+```python
+from runner.examine import Examiner
+from functools import partial
 
-### Examining results and rerunning experiments.
+# define a metric parser for each directory (experiment)
+def get_bleu(command, path, experiment, caches):
+    examples = prepare_examples(command, path, experiment)
+    if examples is None:
+        return
+    try:
+        preds = [e["D"] for e in examples]
+        refs = [e["T"] if "T" in e else " ".join(e["C"]) for e in examples]
+        bleu = compute_bleu(preds, refs)
+        experiment.metric[command] = bleu
+    except:
+        pass
 
-Additional to log files, `param.json` and `stat.json` are also written to `{_output}`.
-`param.json` records relevant params and commands of the experiment.
-
-```json
-{
-  "_commands": {
-    "base": "CUDA_VISIBLE_DEVICES=1 echo 1 --bracket 1 2021-07-13.02:40:07 Curl_1-Bracket_1 output/Curl_1-Bracket_1 > output/Curl_1-Bracket_1/log.base.2021-07-13.02:40:07 2>&1",
-    "pack": "CUDA_VISIBLE_DEVICES=1 echo 1 --bracket 1 > output/Curl_1-Bracket_1/log.pack.2021-07-13.02:40:07 2>&1",
-    "remap": "CUDA_VISIBLE_DEVICES=1 echo --alias_remap_new_bracket1 1 --alias_remap_new_bracket2 2 > output/Curl_1-Bracket_1/log.remap.2021-07-13.02:40:07 2>&1",
-    "replace": "CUDA_VISIBLE_DEVICES=1 echo --alias_replaced1 1 --alias_replaced2 1 > output/Curl_1-Bracket_1/log.replace.2021-07-13.02:40:07 2>&1"
-  },
-  "_datetime": "2021-07-13.02:40:07",
-  "_name": "Curl_1-Bracket_1",
-  "_output": "output/Curl_1-Bracket_1",
-  "alias_remap": "remap1",
-  "alias_replace": 1,
-  "bracket": 1,
-  "curl": 1,
-  "remap": "remap1",
-  "remap_bracket": 0,
-  "remap_curl": 0,
-  "replace": 1
-}
+examiner = Examiner()  # container for parsed results
+# register parser for each directory (experiment)
+examiner.add(partial(get_bleu, "test"))
+# run registered parser for directories matched by regex 
+examiner.exam(output="output", regex=".*powernorm.*")
+# print the tsv table that can be readily pasted to spreadsheet
+examiner.table()
 ```
 
-`stat.json` records the running status of each command:
-`0` for success and `1` for failure. Success commands will be skipped by default. To force rerun, specify `-f`.
-
-```json
-{
-  "base": {
-    "code": 0
-  },
-  "pack": {
-    "code": 0
-  },
-  "remap": {
-    "code": 0
-  },
-  "replace": {
-    "code": 0
-  }
-}
-```
-
-### Parameter aliases, parameter packages and default parameters
-
-TODO
 

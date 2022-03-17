@@ -1,6 +1,7 @@
 import glob
 import os
 import json
+import yaml
 import re
 import collections
 import json
@@ -126,17 +127,30 @@ def shell_arg(value):
         raise ValueError("{} is not a str, int or float.".format(repr(value)))
 
 
-def get_shell_arg(spec, param, bool_as_flag=True):
+def map_placeholder(spec, param):
     value = spec[param]
-    if bool_as_flag and isinstance(value, bool):
+    if isinstance(value, (str, int, float)):
+        return shell_arg(value)
+    elif isinstance(value, bool):
+        ValueError(
+                "boolean param {} no supported as {}, please specify it as {}.".format(repr(param),
+                                                                                       repr("{" + param + "}"),
+                                                                                       repr("[" + param + "]")))
+    else:
+        raise ValueError("{} of type {} is supported. use str, int, or float.".format(repr(param), type(value)))
+
+
+def map_replacement(spec, param):
+    value = spec[param]
+    if isinstance(value, bool):
         if value:
             return '--{}'.format(param)
         else:
             return ""
     elif isinstance(value, (str, int, float)):
-        return shell_arg(value)
+        return "--{} ".format(param) + shell_arg(value)
     else:
-        raise ValueError("{} is not a str, int, bool or float.".format(repr(value)))
+        raise ValueError("{} of type {} is supported. use str, bool, int, or float.".format(repr(param), type(value)))
 
 
 def json_load(filename):
@@ -145,9 +159,20 @@ def json_load(filename):
     return d
 
 
-def json_dump(d, filename, sort_keys=True, indent=4):
+def json_dump(d, filename):
     with open(filename, "w") as fout:
-        json.dump(d, fout, sort_keys=sort_keys, indent=indent)
+        json.dump(d, fout, sort_keys=True, indent=4)
+
+
+def yaml_load(filename):
+    with open(filename, "r") as fin:
+        d = yaml.load(fin, Loader=yaml.FullLoader)
+    return d
+
+
+def yaml_dump(d, filename):
+    with open(filename, "w") as fout:
+        yaml.dump(d, stream=fout, width=1000000)
 
 
 def color_print(str, color):
