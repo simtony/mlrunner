@@ -100,8 +100,8 @@ START   gpu: 0, train: 1/ 4, output/Norm_new-Moment_0.1
 START   gpu: 1, train: 2/ 4, output/Norm_new-Moment_0.05
 START   gpu: 2, train: 3/ 4, output/Norm_batch-Moment_0.1
 START   gpu: 3, train: 4/ 4, output/Norm_batch-Moment_0.05
-START   gpu: 2, avg  : 1/ 6, output/Norm_new-Moment_0.1
-FAIL    gpu: 2, avg  : 1/ 6, output/Norm_new-Moment_0.1
+START   gpu: 0, avg  : 1/ 4, output/Norm_new-Moment_0.1
+FAIL    gpu: 0, avg  : 1/ 4, output/Norm_new-Moment_0.1
 ...
 ```
 We can use `tensorboard --host $(hostname -I | awk '{print $1}') --logdir output` to track the training progress.
