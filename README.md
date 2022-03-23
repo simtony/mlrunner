@@ -2,7 +2,7 @@
 
 A light-weight tool to currently run experiments with different command line params.
 
-During a typical iteration in neural network development, we need to deal with a batch of experiments.  I have seen two typical strategies adopted by my peers:
+During neural network development, we need to deal with a batch of experiments.  In general two typical strategies are adopted:
 1. Run them one after another by hand, and manually paste each result in a spreadsheet 
 2. Use a for loop in a bash script
 
@@ -12,14 +12,14 @@ Such strategies quickly bring frustration irrelevant to the improvements and ins
 3. Accessibility. How to distinguish different runs in the file system while maintaining human readability? How to quickly discover insights from tens of hundreds of results? How to minimally tweak the existing code to achieve efficiency?
 4. Robustness: What if your machine is temporally down? Should you rerun all the experiments? 
 
-Over the years I have developed an effective strategy to cope with these problems which relies on this tool. In a nutshell:
-1. Pull every modification into command line args. This interface is consistent to most code base. 
+Over the years I have developed an effective workflow to cope with these problems. This tool tightly integrates into the workflow. In a nutshell:
+1. Make every modification (architecture, hyperparameters, training regime, etc.) adjustable by command line args. This interface is consistent to most code base. 
    1. For model modification, use if/else or switch/case
-   2. For datasets, specify it with directory
-   3. Others can be set as flag or params
-2. Specify the default params in a command template. Pull the params your care as variables and list the values you are interested in a configuration file. Specify the default values of these params.
-3. Use a pool of workers to concurrently run the tasks. Dump all the relevant raw data into a directory named by the (param, value) tuples -- making them human-readable. Track the training progress with tensorboard.
-4. Apply the same processing code for each run to obtain results you need, and aggregate them for visualization: tensorboard hyperparams or simply a spreadsheet.
+   2. For datasets, specify the directory
+2. Specify the default params in a command template. Make interesting params variables and list their available values in a configuration file. Specify default values of these params.
+3. Use a pool of workers to concurrently run tasks specified in the config file. Dump all the relevant raw data into a directory named by the (param, value) tuples -- making them human-readable yet distinct for each experiment. Track the training progress with tensorboard.
+4. Apply the same processing code for each run to parse results you need, and aggregate them for visualization: use tensorboard hyperparams, jupyter notebook or simply a spreadsheet.
+
 
 ## Install
 ```
@@ -41,11 +41,11 @@ run
 run -o <output> -y <yaml>
 ```
 
-Use `run -h` for available command lines args. See `params.yaml` for available configurations.
+Use `run -h` for all command-line args. See `params.yaml` for configurations available.
 
 
 ## A working example
-Suppose we are interested in different normalization layers and developed a new one called "alternorm". It has a hyperparameter "momentum", similar to existing methods batchnorm. Our baseline uses powernorm. Each run involves training, checkpoint average and test with the averaged checkpoint. So we can specify the following yaml config:
+Suppose we are interested in different normalization layers and developed a new one called "newnorm". It has a hyperparameter "momentum", similar to existing batchnorm. Each run involves training, checkpoint average and test with the averaged checkpoint. So we can specify the following yaml config:
 
 ```yaml
 ---
@@ -81,43 +81,34 @@ template:
 
 default:
   data: iwslt14
-  norm: layer
+  norm: batch
   moment: 0.1
 
 resource: [ 0, 1, 2, 3 ]
 
 
 ---
-norm: [ power, alter, batch ]
+norm: [ new, batch ]
 moment: [ 0.1, 0.05 ]
 ```
-After syncing the modified code and the yaml file to the server, we simply hit `run`. As we specify 4 workers each with only one gpu, there are 4 tasks run concurrently:
+After syncing the code and the yaml file to the server, we simply hit `run`. As we specify 4 workers each with only one gpu, there are 4 tasks running concurrently:
 ```
 $ run
 Orphan params: set()
-Tasks: 6, commands to run: 18
-START   gpu: 0, train: 1/ 6, output/Norm_power-Moment_0.1
-START   gpu: 1, train: 2/ 6, output/Norm_alter-Moment_0.1
-START   gpu: 2, train: 3/ 6, output/Norm_batch-Moment_0.1
-START   gpu: 3, train: 4/ 6, output/Norm_power-Moment_0.1
-START   gpu: 2, avg  : 3/ 6, output/Norm_batch-Moment_0.1
-FAIL    gpu: 2, avg  : 3/ 6, output/Norm_batch-Moment_0.1
-START   gpu: 2, train: 5/ 6, output/Norm_alter-Moment_0.1
-START   gpu: 1, avg  : 2/ 6, output/Norm_alter-Moment_0.1
-START   gpu: 1, test : 2/ 6, output/Norm_alter-Moment_0.1
-START   gpu: 1, train: 6/ 6, output/Norm_batch-Moment_0.1
-START   gpu: 3, avg  : 4/ 6, output/Norm_power-Moment_0.1
-FAIL    gpu: 3, avg  : 4/ 6, output/Norm_power-Moment_0.1
-START   gpu: 2, avg  : 5/ 6, output/Norm_alter-Moment_0.1
-START   gpu: 2, test : 5/ 6, output/Norm_alter-Moment_0.1
+Tasks: 4, commands to run: 12
+START   gpu: 0, train: 1/ 4, output/Norm_new-Moment_0.1
+START   gpu: 1, train: 2/ 4, output/Norm_new-Moment_0.05
+START   gpu: 2, train: 3/ 4, output/Norm_batch-Moment_0.1
+START   gpu: 3, train: 4/ 4, output/Norm_batch-Moment_0.05
+START   gpu: 2, avg  : 1/ 6, output/Norm_new-Moment_0.1
+FAIL    gpu: 2, avg  : 1/ 6, output/Norm_new-Moment_0.1
 ...
 ```
-
-We use `tensorboard --host $(hostname -I | awk '{print $1}') --logdir output` to track the training progress.
+We can use `tensorboard --host $(hostname -I | awk '{print $1}') --logdir output` to track the training progress.
 
 After all experiments are finished, we can examine the logs for debugging:
 ```
-$ ls output/Norm_power-Moment_0.1
+$ ls output/Norm_batch-Moment_0.1
 checkpoint51.pt
 checkpoint52.pt
 averaged_model.pt
@@ -128,30 +119,28 @@ param
 stat
 ```
 
-and start a jupyter notebook to analyze useful metrics. We provide `Examiner` as a container to iteratively apply the metric parser to all experiments and aggregate the results. In this example we simply parse the test log for the test BLEU:
+and start a jupyter notebook to analyze interesting metrics. We provide `Examiner` as a container to iteratively apply the metric parser to all experiments and aggregate the results. See the code for more details.
+
+In this example we simply parse the test log for the test BLEU:
 ```python
-from runner.examine import Examiner
-from functools import partial
+from runner.examine import Examiner, latest_log
 
 # define a metric parser for each directory (experiment)
-def get_bleu(command, path, experiment, caches):
-    examples = prepare_examples(command, path, experiment)
-    if examples is None:
-        return
-    try:
-        preds = [e["D"] for e in examples]
-        refs = [e["T"] if "T" in e else " ".join(e["C"]) for e in examples]
-        bleu = compute_bleu(preds, refs)
-        experiment.metric[command] = bleu
-    except:
-        pass
-
+def add_bleu(output_dir, experiment, caches):
+    # Each parser follows the same signature
+    # It can read/write to a global cache dict `caches`, 
+    # and read/write each experiment: 
+    # collections.namedtuple("Experiment", ["cache", "metric", "param"])
+    latest_test_log = latest_log("test", output_dir)
+    bleu = parse_bleu(latest_test_log) #  a user-defined log parser
+    experiment.metric["test_bleu"] = bleu
+    
 examiner = Examiner()  # container for parsed results
 # register parser for each directory (experiment)
-examiner.add(partial(get_bleu, "test"))
-# run registered parser for directories matched by regex 
+examiner.add(add_bleu)
+# run all parsers for directories matched by regex 
 examiner.exam(output="output", regex=".*powernorm.*")
-# print the tsv table that can be readily pasted to spreadsheet
+# print the tsv table with all (different) params and metrics of each experiment
 examiner.table()
 ```
 
