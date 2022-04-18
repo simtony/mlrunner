@@ -23,6 +23,14 @@ Edit `params.yaml` and then run `run` in command line.
 
 Use `run -h` for documentation of command-line args. See comments in `params.yaml` for documentation of configurations available and parameter mapping rules.
 
+## Under the Hood
+
+The tool edits each command template with the following steps:
+1. Substitute the param placeholders in the command templates of the first doc with sweep of params specified in later docs
+2. Append shell environment variable `CUDA_VISIBLE_DEVICES={resource}` as the prefix
+3. Append shell redirect `> output_dir/log.{command}.{time} 2>&1` as the suffix
+
+
 ## Example
 
 Suppose we are interested in different normalization layers and developed a new one called "newnorm". It has a
