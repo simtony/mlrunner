@@ -21,51 +21,81 @@
 
 # Command templates with params to be filled
 template:
+  # example for available dtypes
   dtype: >
-    echo command {param1} [param2] "{'param3': {param3}}" [param4]
+    echo command [str] [int] [float] [bool]
+
+  # example for different replacement rules
+  replace: >
+    echo command [flag-value] {value} [flag] "{blahblah: {value-in-quote}}"
+
+  # example for reserved fields
   reserved: >
     echo command {_time} {_name} {_output}
-  dummy: >
-    echo command {param1} {param2}
+
+  # example for alias params
   alias: >
-    echo command {param1} {param2}
+    echo command {param_alias_1} {param_alias_2}
 
 # Fill in values to a group of params specified in the command.
 # Useful when a setting involves various params to tweak.
 # Alias params should not be specified in command.
 alias:
-  alias:
-    case1: { param1: 1, param2: "1" }
-    case2: { param1: 2, param2: "2" }
+  param_alias:
+    case_lala1: { param_alias_1: 1, param_alias_2: "1" }
+    case_haha2: { param_alias_1: 2, param_alias_2: "2" }
 
 default:
-  param1: 1
-  param2: "adsf"
-  param3: 1.3
-  param4: False
+  str: "string value " # string value. use quote if it has spaces
+  int: 1
+  float: 1.1
+  bool: False # boolean can only be True or False
+  flag-value: 1
+  value: 2
+  flag: False
+  value-in-quote: 10
+  param_alias_1: 0
+  param_alias_2: 0
 
 
 # GPU indices to be filled in CUDA_VISIBLE_DEVICES={}, each corresponds to a worker.
 # For multi-gpu tasks, simply set [ "1,2", "3,4" ]. the same resource can be assigned multiple times,
-# typically when your task requires a very low gpu utilization, e.g. [ "1", "2", "3", "1", "2", "3" ].
-resource: [ "1" , "2" ]
+# when your task requires a very low gpu utilization, e.g. [ "1", "2", "3", "1", "2", "3" ].
+resource: [ "0" , "1" ]
 
 # List all possible parameter choices here, `run` will sweep all possible combinations.
 ---
+# test substitution for different values
 _title: dtype # -t <title> will run choices with _title==<title>
-_cmd: [ dtype, reserved ] # which command in the template to run. "run --command blah" will override it.
-param1: [ 10 ]
-param2: [ "{'a': 'b'} " ] # place quote to protect white spaces
-param3: [ 3.1415 ]
-param4: [ True ] # will be converted into flag "--param4"
+_cmd: [ dtype ] # which command in the template to run. "run --command blah" will override it.
+dummy: [ "dtype" ] # params not specified in the template will only affect the output directory naming
+str: [ "new string" ] # place quote to protect white spaces
+int: [ 2 ]
+float: [ 3.1415 ]
+bool: [ True ] # will be converted into flag "--bool"
+
 
 ---
-_title: dummy
-_cmd: [ dummy ]
-dummy: [ 1 ] # only affects the directory name
+_title: default
+# variables not specified will take the default values
+_cmd: [ dtype ]
+dummy: [ "default_dtype" ]
 
+---
+_title: replace
+# different types replacements
+_cmd: [ dtype ]
+dummy: [ "replace" ] # params not specified in the template will only affect the output directory naming
+
+
+---
+_title: reserve
+# print reserved params
+_cmd: [ reserved ]
+dummy: [ "reserve" ] # params not specified in the template will only affect the output directory naming
 
 ---
 _title: alias
 _cmd: [ alias ]
-alias: [ case2 ] # assign the group of case2: { param1=2, param2="2" }
+dummy: [ "alias" ] # params not specified in the template will only affect the output directory naming
+param_alias: [ case_haha2 ] # assign the group of case_haha2: { param_alias_1=2, param_alias_2="2" }
