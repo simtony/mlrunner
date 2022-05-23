@@ -1,0 +1,9 @@
+_name: Data_CIFAR10-Loss_CE-Lr_0.01-Seed_0
+_output: output/Data_CIFAR10-Loss_CE-Lr_0.01-Seed_0
+_scripts:
+  train: CUDA_VISIBLE_DEVICES=0 python3 main.py --dataset CIFAR10 --loss CE --lr 0.01 --seed 0  > output/Data_CIFAR10-Loss_CE-Lr_0.01-Seed_0/log.train.20220517.074342 2>&1
+_time: '20220517.074342'
+data: CIFAR10
+loss: CE
+lr: 0.01
+seed: 0

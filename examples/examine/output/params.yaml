@@ -1,0 +1,19 @@
+---
+template:
+  train: >
+    python3 main.py --dataset {data} --loss {loss} [lr] [seed]
+
+default:
+  data: MNIST
+  loss: CE
+  lr: 0.01
+  seed: 0
+
+resource: [ 0, 1, 2, 3 ]
+
+---
+_title: cifar10
+data: [ CIFAR10 ]
+loss: [ CE ]
+lr: [ 0.1, 0.01 ]
+seed: [ 0, 1, 2 ]
