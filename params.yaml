@@ -61,7 +61,7 @@ default:
 # GPU indices to be filled in CUDA_VISIBLE_DEVICES={}, each corresponds to a worker.
 # For multi-gpu tasks, simply set [ "1,2", "3,4" ]. the same resource can be assigned multiple times,
 # when your task requires a very low gpu utilization, e.g. [ "1", "2", "3", "1", "2", "3" ].
-resource: [ "0" , "1" ]
+resource: [ "0", "1" ]
 
 # List all possible parameter choices here, `run` will sweep all possible combinations.
 ---

@@ -9,7 +9,9 @@ import curses
 import shlex
 import tabulate
 import itertools
-
+import time
+from contextlib import contextmanager
+from pathlib import Path
 
 # GPU sorting
 def query_gpus():
@@ -164,6 +166,26 @@ def json_dump(d, filename):
         json.dump(d, fout, sort_keys=True, indent=4)
 
 
+@contextmanager
+def lock(filename, poll=0.2, timeout=60):
+    while timeout > 0:
+        try:
+            os.link(filename, filename + ".lock")
+            break
+        except FileExistsError:
+            time.sleep(poll)
+            timeout -= poll
+
+    try:
+        yield filename
+
+    finally:
+        try:
+            os.unlink(filename + ".lock")
+        except FileNotFoundError:
+            pass
+
+
 def yaml_load(filename):
     with open(filename, "r") as fin:
         d = yaml.load(fin, Loader=yaml.FullLoader)
@@ -173,6 +195,25 @@ def yaml_load(filename):
 def yaml_dump(d, filename):
     with open(filename, "w") as fout:
         yaml.dump(d, stream=fout, width=1000000)
+
+
+@contextmanager
+def edit_yaml(output, file):
+    # read&write yaml with lock
+    path = Path(output, file)
+    if not path.exists():
+        path.touch()
+    yaml_dict = {}
+    with lock(str(path)):
+        try:
+            yaml_dict = yaml_load(path)
+            if yaml_dict is None:
+                yaml_dict = {}
+            # pass by reference. re-assigned object in the `with` context will not be saved.
+            yield yaml_dict
+        finally:
+            if yaml_dict is not None:
+                yaml_dump(yaml_dict, path)
 
 
 def color_print(str, color):

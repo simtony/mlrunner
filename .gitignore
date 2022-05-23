@@ -16,6 +16,6 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-output/
+./output/
 .idea/
 

@@ -13,7 +13,7 @@ pip install git+https://github.com/simtony/runner.git
 dependencies:
 
 ```
-python >= 3.6.X
+python >= 3.7
 pyyaml
 ```
 

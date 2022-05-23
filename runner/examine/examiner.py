@@ -9,10 +9,7 @@ Experiment = collections.namedtuple("Experiment", ["cache", "metric", "param"])
 
 
 def trunc(x, significant=2):
-    if x > 1:
-        return float(format(x, '.{}f'.format(significant)))
-    else:
-        return float(format(x, '.{}g'.format(significant)))
+    return float(format(x, '.{}f'.format(significant)))
 
 
 def dict2tuple(dictionary, keys):
@@ -35,13 +32,13 @@ def table(entries, headers, tsv=True):
         print(tabulate.tabulate(entries, headers, "pipe"))
 
 
-def compute_mean_std_num(values, float_sig=2):
+def mean_std_num(values, significant=2, scale=1):
     num = len(values)
     if num == 0:
         return 0, 0, 0
-    mean = trunc(sum(values) / num, float_sig)
-    std = trunc((sum((v - mean) ** 2 for v in values) / num) ** 0.5, float_sig)
-    return mean, std, num
+    mean = sum(values) / num
+    std = (sum((v - mean) ** 2 for v in values) / num) ** 0.5
+    return trunc(mean * scale, significant), trunc(std * scale, significant), num
 
 
 class Key2Values(object):
@@ -161,6 +158,35 @@ class Examiner(object):
         entries = [[experiment.param.get(h, None) for h in param_headers] +
                    [experiment.metric.get(h, None) for h in metric_headers]
                    for experiment in self.experiments.values()]
+        table(entries, headers, tsv)
+        if raw:
+            return entries, headers
+
+    def table_agg(self, metric, params, scale=1, significant=2, tsv=True, concise=True, raw=False):
+        # find unique param values
+        param2values = self._get_param2values()
+        if concise:
+            # remove columns with the same values
+            param_headers = sorted(list(k for k, v in param2values.items() if len(v) > 1))
+        else:
+            param_headers = sorted(list(param2values.keys()))
+
+        if not isinstance(params, (list, tuple)):
+            params = [params]
+        param_headers = [h for h in param_headers if h not in params]
+
+        k2v = Key2Values(list)
+        for experiment in self.experiments.values():
+            k = tuple(experiment.param.get(h, None) for h in param_headers)
+            v = experiment.metric.get(metric, None)
+            if v is None:
+                continue
+            else:
+                k2v.add(k, v)
+        headers = param_headers + ["mean", "std", "num"]
+        entries = []
+        for k, v in k2v.items():
+            entries.append((*k, *mean_std_num(v, significant, scale)))
         table(entries, headers, tsv)
         if raw:
             return entries, headers

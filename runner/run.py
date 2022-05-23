@@ -12,7 +12,7 @@ import os
 import shutil
 from datetime import datetime
 from runner.utils.misc import spec2name, map_placeholder, map_replacement, shell_arg, \
-    yaml_load, yaml_dump, color_print
+    yaml_load, yaml_dump, color_print, edit_yaml
 from runner.utils.config import load_yaml, InvalidYAMLException
 
 TIME = datetime.now().strftime("%Y%m%d.%H%M%S")
@@ -118,7 +118,6 @@ def build_tasks(args, templates, aliases, defaults, choices):
     uniq_entries.uniq_output = []
 
     tasks = []
-    stats = dict()
     orphans = set()  # track params not consumed by any command
     for choice in choices:
         commands, entries = parse_choice(args, choice, aliases, defaults)
@@ -182,119 +181,107 @@ def build_tasks(args, templates, aliases, defaults, choices):
                 else:
                     suffix = "> {} 2>&1".format(log)
                 scripts[command] = template + " " + suffix
-
             orphans.update(unused_params)
-            # track state to avoid rerunning commands.
-            stat = {key: {"state": "scheduled"} for key in scripts.keys()}
-            if not args.force:
-                stat_path = os.path.join(spec["_output"], "stat")
-                if os.path.exists(stat_path):
-                    prev_stat = yaml_load(stat_path)
-                    for key in stat.keys():
-                        if key in prev_stat and prev_stat[key]["state"] == "finished":
-                            stat[key]["state"] = "finished"
-
             tasks.append({"spec": spec, "scripts": scripts})
-            stats[spec["_name"]] = stat
     color_print("Orphan params: {}".format(orphans), "red")
-
     if args.debug:
         tasks = tasks[:1]
-        stats = {tasks[0]["spec"]["_name"]: {key: {"state": "scheduled"} for key in tasks[0]["scripts"].keys()}}
-    return tasks, stats
+        args.force = True
+    return tasks
 
 
-async def build_worker(tasks, queue, stats, resource, verbose=True):
+async def build_worker(tasks, queue, resource, skips, fails, force=False, dry_run=False):
     while True:
         index = await queue.get()
         spec, scripts = tasks[index]["spec"], tasks[index]["scripts"]
-        stat = stats[spec["_name"]]
         prefix = "CUDA_VISIBLE_DEVICES={}".format(resource)
-        os.makedirs(spec["_output"], exist_ok=True)
         for command, script in scripts.items():
             scripts[command] = " ".join([prefix, script])
         spec["_scripts"] = scripts
 
-        # dump param into json
-        spec_path = os.path.join(spec["_output"], "param")
-        if os.path.exists(spec_path):
-            prev_spec = yaml_load(spec_path)
-            for key, value in spec.items():
-                # don't overwrite old commands
-                if key == "_scripts":
-                    prev_spec[key].update(spec[key])
-                else:
-                    prev_spec[key] = spec[key]
-        else:
-            prev_spec = spec
-        yaml_dump(prev_spec, spec_path)
-
+        os.makedirs(spec["_output"], exist_ok=True)
+        # dump param
+        with edit_yaml(spec["_output"], "param") as prev_spec:
+            if not prev_spec:
+                prev_spec.update(spec)
+            else:
+                for key, value in spec.items():
+                    # don't overwrite old commands
+                    if key == "_scripts":
+                        prev_spec[key].update(spec[key])
+                    else:
+                        prev_spec[key] = spec[key]
         for command, script in scripts.items():
             info = "{:8}:{:2d}/{:2d}, {}".format(command, index + 1, queue.maxsize, shell_arg(spec["_output"]))
-            if stat[command]["state"] == "finished":
-                print("SKIP " + info)
-                continue
-            stat[command]["gpu"] = resource
-
-            process = await asyncio.create_subprocess_shell(script, executable='/bin/bash')
-            info = "gpu: {}, ".format(resource) + info
-            print("START   " + info)
-            await process.wait()
-
-            code = process.returncode
-            stat_path = os.path.join(spec["_output"], "stat")
-            if os.path.exists(stat_path):
-                out_stat = yaml_load(stat_path)
-                out_stat.update(stat)
-            else:
-                out_stat = stat
             try:
-                if code != 0:
-                    stats[spec["_name"]][command]["state"] = "failed"
-                    out_stat[command]["state"] = "failed"
-                    color_print("FAIL    " + info, "red")
-                    break
+                with edit_yaml(spec["_output"], "stat") as stat:
+                    if command in stat and stat[command] in ["finished", "running"] and not force:
+                        color_print("SKIP " + info, "green")
+                        skips.append(spec["_output"])
+                        continue
+                    else:
+                        stat[command] = "running"
+                info = "gpu: {}, ".format(resource) + info
+                print("START   " + info)
+                if dry_run:
+                    print(script)
+                    await asyncio.sleep(0.05)
                 else:
-                    stats[spec["_name"]][command]["state"] = "finished"
-                    out_stat[command]["state"] = "finished"
-                    if verbose:
-                        color_print("SUCCEED " + info, "green")
-            except Exception as e:
-                print(e, type(e))
-            finally:
-                yaml_dump(out_stat, stat_path)
+                    process = await asyncio.create_subprocess_shell(script, executable='/bin/bash')
+                    await process.wait()
+                    code = process.returncode
+                    stat_path = os.path.join(spec["_output"], "stat")
+                    with edit_yaml(spec["_output"], "stat") as stat:
+                        if code != 0:
+                            stat[command] = "failed"
+                            color_print("FAIL    " + info, "red")
+                            fails.append(spec["_output"])
+                            break
+                        else:
+                            stat[command] = "finished"
+            except Exception as exception:
+                with edit_yaml(spec["_output"], "stat") as stat:
+                    stat[command] = "failed"
+                    fails.append(spec["_output"])
+                raise exception
+            except asyncio.CancelledError as error:
+                with edit_yaml(spec["_output"], "stat") as stat:
+                    stat[command] = "failed"
+                    fails.append(spec["_output"])
+                raise error
         queue.task_done()
 
 
-async def run_all(args, tasks, stats, resources):
+async def run_all(args, tasks, resources):
     # populate the task queue
     task_num = len(tasks)
-    cmd_num = sum(sum(v["state"] != "finished" for v in stat.values()) for stat in stats.values())
+    cmd_num = sum(len(task["scripts"]) for task in tasks)
+    print("Tasks: {}, Commands: {}".format(task_num, cmd_num))
     queue = asyncio.Queue(maxsize=task_num)
     for index in range(task_num):
         queue.put_nowait(index)
-    print("Tasks: {}, commands to run: {}".format(task_num, cmd_num))
-
     # build workers that consuming tasks in task_
+    skips = []
+    fails = []
     workers = []
     loop = asyncio.get_event_loop()
     for resource in resources:
-        workers.append(loop.create_task(build_worker(tasks, queue, stats, resource, verbose=args.verbose)))
+        workers.append(loop.create_task(build_worker(tasks, queue, resource, skips, fails, force=args.force,
+                                                     dry_run=args.dry_run)))
     await queue.join()
 
     for worker in workers:
         worker.cancel()
     await asyncio.gather(*workers, return_exceptions=True)
-    failed = []
-    for name, stat in stats.items():
-        for state in set(info["state"] for info in stat.values()):
-            if state == "failed":
-                failed.append(name)
-                break
-    if failed:
-        color_print("Failed tasks: %d/%d" % (len(failed), len(tasks)), "red")
-        for name in failed:
-            color_print('    {}'.format(os.path.join(args.output, name)), "red")
+    if skips:
+        color_print("Skip tasks: {}/{}".format(len(skips), len(tasks)), "green")
+        for name in skips:
+            color_print('    {}'.format(name), "green")
+
+    if fails:
+        color_print("Failed tasks: {}/{}".format(len(skips), len(tasks)), "red")
+        for name in fails:
+            color_print('    {}'.format(name), "red")
     else:
         color_print("No task failed.", "green")
 
@@ -307,12 +294,12 @@ def main():
     parser.add_argument("-t", "--title", default=None, help="choose param choices with specified title to sweep")
     parser.add_argument("-d", "--debug", default=False, action='store_true',
                         help="debug mode: only run the first task, log will be directed to stdout.")
+    parser.add_argument("--dry-run", default=False, action='store_true',
+                        help="dry run mode: only print the scripts to be run.")
     parser.add_argument("-c", "--command", default=None, type=str, nargs="+",
                         help="choose which command to run, by default run all commands")
     parser.add_argument("-f", "--force", default=False, action="store_true",
                         help="whether to overwrite tasks successfully ran")
-    parser.add_argument("-v", "--verbose", default=False, action="store_true",
-                        help="whether to print success tasks")
     parser.add_argument("-r", "--resource", default="", nargs="+",
                         help="override resources in params.yaml with a space separate list, "
                              "for example `-r 1,2 3,4` gives ['1,2', '3,4']")
@@ -323,9 +310,9 @@ def main():
 
     args = parser.parse_args()
     resources, templates, aliases, defaults, choices = load_yaml(args)
-    tasks, stats = build_tasks(args, templates, aliases, defaults, choices)
+    tasks = build_tasks(args, templates, aliases, defaults, choices)
 
     os.makedirs(args.output, exist_ok=True)
     yaml_bak_path = os.path.join(args.output, args.yaml if args.title is None else args.yaml + "." + args.title)
     shutil.copyfile(args.yaml, yaml_bak_path)
-    run(run_all(args, tasks, stats, resources))
+    run(run_all(args, tasks, resources))

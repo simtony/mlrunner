@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
         name='runner',
-        version='0.5.4',
+        version='0.5.5',
         author='Tony Ou',
         author_email='simtony2@gmail.com',
         url='https://github.com/simtony/runner',
@@ -14,7 +14,7 @@ setuptools.setup(
         ],
         install_requires=['pyyaml', 'tabulate'],
         packages=setuptools.find_packages(),
-        python_requires='>=3.6.*',
+        python_requires='>=3.7',
         entry_points={
             'console_scripts': [
                 'run = runner.run:main'
