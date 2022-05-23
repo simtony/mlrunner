@@ -1,7 +1,7 @@
 import setuptools
 
 setuptools.setup(
-        name='runner',
+        name='mlrunner',
         version='0.5.5',
         author='Tony Ou',
         author_email='simtony2@gmail.com',

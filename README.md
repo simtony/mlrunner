@@ -7,7 +7,7 @@ solving all the above problems.
 ## Install
 
 ```
-pip install git+https://github.com/simtony/runner.git
+pip install mlrunner
 ```
 
 dependencies:
