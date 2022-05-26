@@ -1,7 +1,7 @@
 # Quick Start
 
-Running many experiments while minimizing idle GPU time requires a lot of manual efforts.
-This light-weight tool helps you currently run a **LOT** of experiments with simple commands and configurations.
+Running many experiments while minimizing idle GPU time requires much manual effort.
+This lightweight tool helps you currently run a **LOT** of experiments with simple commands and configurations.
 
 ## Install
 
@@ -20,9 +20,10 @@ pyyaml
 
 Edit `params.yaml` and then hit `run`.
 
-See `run -h` for available command-line args. See comments in `params.yaml` for available of configurations.
+See `run -h` for command-line args available. See comments in `params.yaml` for configurations available.
 
 For typical use cases see `examples`.
+
 
 ## Example
 
@@ -140,22 +141,23 @@ The tool edits each command template with the following steps:
 2. Append shell environment variable `CUDA_VISIBLE_DEVICES={resource}` as the prefix
 3. Append shell redirect `> output_dir/log.{command}.{time} 2>&1` as the suffix
 
+
 # Workflow
 
 Manually scheduling a **LOT** of experiments can quickly lead to frustrations:
 
-1. Efficiency. During early phase we experiment on small models and datasets which are not resource hungry. One can find it hard to fully utilize the gpu times on modern multi-gpu machines.
-2. Cognitive load. There are lengthy pipelines and numerous parameters to tune: data, model architecture, hyperparams, training regimes and test regimes. These knots are typically scatter in code, data or command-line args, making the experiment process error-prone and cognitively draining.
+1. Efficiency. During the early phase, we experiment on small models and datasets which are not resource hungry. One can find it hard to fully utilize the GPU times on modern multi-GPU machines.
+2. Cognitive load. There are lengthy pipelines and numerous parameters to tune: data, model architecture, hyperparams, training regimes, and test regimes. These knots are typically scattered in code, data, or command-line args, making the experiment process error-prone and cognitively draining.
 3. Accessibility. How to distinguish artifacts of different experiments in the file system while maintaining readability? How to quickly obtain insights from tens of hundreds of results? How to quickly set up the workflow for new projects?
 4. Robustness: What if your machine is temporally down or some bug happened in your code? Which experiment needs rerun?
 
 This tool tightly integrates into a more effective workflow. In a nutshell:
 
-1. Make every modification (architecture, params, training regime, etc.) adjustable by command line args. This
-   interface is consistent to most code base.
-    1. For structural change of models, use if/else or switch/case
+1. Make every modification (architecture, params, training regime, etc.) adjustable by command line args. This interface is consistent with most code bases.
+    1. For structural changes of models, use if/else or switch/case
     2. For datasets, specify the directory
 2. Specify irrelevant params in the command template. Make relevant params to the experiment variables (`[param]` or `{param}`) and list values you want to test in a configuration file. Specify default values of these params for reference.
 3. Use a pool of workers to concurrently run all your experiments. Track progress with tools like tensorboard.
-4. Apply the same processing code for each run to parse results you need, and aggregate them for visualization: use tensorboard hyperparams, jupyter notebook or simply a spreadsheet.
+4. Apply the same processing code for each run to parse results you need, and aggregate them for visualization: use tensorboard hyperparams, jupyter notebook, or simply a spreadsheet.
+
 
