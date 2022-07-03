@@ -274,7 +274,7 @@ async def run_all(args, tasks, resources):
         worker.cancel()
     await asyncio.gather(*workers, return_exceptions=True)
     if skips:
-        color_print("Skip tasks: {}/{}".format(len(skips), len(tasks)), "green")
+        color_print("Skipped tasks: {}/{}".format(len(skips), len(tasks)), "green")
         for name in skips:
             color_print('    {}'.format(name), "green")
 

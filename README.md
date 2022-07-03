@@ -3,34 +3,36 @@
 Running many experiments while minimizing idle GPU time requires much manual effort.
 This lightweight tool helps you currently run a **LOT** of experiments with simple commands and configurations.
 
-## Install
+## Installation
 
-```
-pip install mlrunner
+```commandline
+$ pip install mlrunner
 ```
 
-dependencies:
-
-```
-python >= 3.7
-pyyaml
-```
+dependencies: `python >= 3.7, pyyaml`
 
 ## Usage
 
-Edit `params.yaml` and then hit `run`.
+Edit `params.yaml` in the repo and simply
+```commandline
+$ run
+```
 
-See `run -h` for command-line args available. See comments in `params.yaml` for configurations available.
+For available command-line args, use 
+```commandline
+$ run -h
+```
+See comments in `params.yaml` for available configurations. For typical use cases see `examples`.
 
-For typical use cases see `examples`.
+
+
 
 
 ## Example
 
 Suppose we develop a new normalization layer "newnorm" and want to compare it to batchnorm. Both have a
 hyperparameter `--moment`. We also want to see how early stop affects our model, which is
-specified by a boolean flag `--early-stop`. Each run involves training, checkpoint average and test with the averaged
-checkpoint. The `params.yaml` can be specified as:
+specified by a boolean flag `--early-stop`. Each run involves training, checkpoint average and test with the averaged checkpoint. Then `params.yaml` can be:
 
 ```yaml
 ---
@@ -68,8 +70,7 @@ early-stop: [ True, False ]
 
 ```
 
-We simply hit `run` for the `6 = 2 * 2 + 2` experiments. Since  `norm=batch,moment=0.1` in the second yaml doc and `norm=batch,early-stop=False` in the third doc share the same params, the latter is skipped. As we specify 4 workers each with only one
-gpu, there are 4 tasks running concurrently:
+Since  `norm=batch,moment=0.1` and `norm=batch,early-stop=False` share the same params, the latter is skipped. As we specify 4 workers each with only one gpu, there are 4 tasks running concurrently:
 
 ```
 $ run
@@ -84,7 +85,7 @@ FAIL    gpu: 0, avg  : 1/ 4, output/Norm_new-Moment_0.1
 ...
 ```
 
-The logs are redirected to directories (referred with `{_output}`) of each experiment (named with parameters):
+The command-line logs are redirected to directories (referred with `{_output}`) of each experiment (named with parameters):
 
 ```
 $ ls output/Norm_batch-Moment_0.1
@@ -132,15 +133,15 @@ batch	0.1	FALSE	14.4
 batch	0.05	FALSE	16.5
 batch	0.1	TRUE	15.0
 ```
-The table can be readily copied to excel or numbers for further analysis. 
+The table can be readily copied to excel or numbers for further analysis.
 
-# Under the Hood
-The tool edits each command template with the following steps:
+## Under the hood
 
-1. Substitute the param placeholders (`{param}` and `[param]`) in the templates of the first doc with a sweep of param combinations specified in later docs
-2. Append shell environment variable `CUDA_VISIBLE_DEVICES={resource}` as the prefix
-3. Append shell redirect `> output_dir/log.{command}.{time} 2>&1` as the suffix
+Each param combination is a task. Tasks constitute an ordered task pool. Each worker bound to a `resource` in `params.yaml` concurrently pulls a task from the pool, edits the commands in `template`, and executes the commands sequentially. Commands in `template` are edited by:
 
+1. Substituting the param placeholders (`{param}` and `[param]`) in the templates of the first doc with a sweep of param combinations specified in later docs
+2. Appending shell environment variable `CUDA_VISIBLE_DEVICES={resource}` as the prefix
+3. Appending shell redirect `> output_dir/log.{command}.{time} 2>&1` as the suffix
 
 # Workflow
 
