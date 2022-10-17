@@ -313,6 +313,7 @@ def main():
     tasks = build_tasks(args, templates, aliases, defaults, choices)
 
     os.makedirs(args.output, exist_ok=True)
-    yaml_bak_path = os.path.join(args.output, args.yaml if args.title is None else args.yaml + "." + args.title)
+    yaml_bak = os.path.basename(args.yaml)
+    yaml_bak_path = os.path.join(args.output, yaml_bak if args.title is None else yaml_bak + "." + args.title)
     shutil.copyfile(args.yaml, yaml_bak_path)
     run(run_all(args, tasks, resources))
