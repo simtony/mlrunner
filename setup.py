@@ -12,7 +12,7 @@ setuptools.setup(
             "License :: OSI Approved :: MIT License",
             "Operating System :: POSIX :: Linux",
         ],
-        install_requires=['pyyaml', 'tabulate'],
+        install_requires=['pyyaml', 'tabulate', 'ilock'],
         packages=setuptools.find_packages(),
         python_requires='>=3.7',
         entry_points={

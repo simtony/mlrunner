@@ -12,6 +12,7 @@ import itertools
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from ilock import ILock, ILockException
 
 # GPU sorting
 def query_gpus():
@@ -204,16 +205,19 @@ def edit_yaml(output, file):
     if not path.exists():
         path.touch()
     yaml_dict = {}
-    with lock(str(path)):
-        try:
-            yaml_dict = yaml_load(path)
-            if yaml_dict is None:
-                yaml_dict = {}
-            # pass by reference. re-assigned object in the `with` context will not be saved.
-            yield yaml_dict
-        finally:
-            if yaml_dict is not None:
-                yaml_dump(yaml_dict, path)
+    try:
+        with ILock(str(path), timeout=60):
+            try:
+                yaml_dict = yaml_load(path)
+                if yaml_dict is None:
+                    yaml_dict = {}
+                # pass by reference. re-assigned object in the `with` context will not be saved.
+                yield yaml_dict
+            finally:
+                if yaml_dict is not None:
+                    yaml_dump(yaml_dict, path)
+    except ILockException:
+        raise ILockException("Worker stuck when updating the status file.")
 
 
 def color_print(str, color):
