@@ -11,9 +11,9 @@ import sys
 import os
 import shutil
 from datetime import datetime
-from runner.utils.misc import spec2name, map_placeholder, map_replacement, shell_arg, \
+from mlrunner.utils.misc import spec2name, map_placeholder, map_replacement, shell_arg, \
     yaml_load, yaml_dump, color_print, edit_yaml
-from runner.utils.config import load_yaml, InvalidYAMLException
+from mlrunner.utils.config import load_yaml, InvalidYAMLException
 
 TIME = datetime.now().strftime("%Y%m%d.%H%M%S")
 

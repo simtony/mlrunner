@@ -1,39 +1,27 @@
-# Introduction
 
-Running many experiments while minimizing idle GPU time requires much manual effort. This lightweight tool helps you currently run a **LOT** of experiments with simple commands and configurations. 
+![](logo.png)
+Maintaining many experiments while making the most of computation resource requires much manual effort. This lightweight tool helps you currently run a **LOT** of experiments with simple commands and configurations. You can aggregate custom metrics for each experiment with a single command.
 
-It tightly integrates into an effective workflow for ML/DL iteration:
-1. Make every modification (architectural changes, params, training regimes, etc.) adjustable by command-line args.
-2. Specify relevant commands as templates and make params relevant to your experiments as slots (`[param]` or `{param}`) to be filled. List interesting value combinations in a configuration file. Specify default values for reference.
-3. Use a pool of workers to concurrently run all your experiments. Track progress with tools like [Tensorboard](https://www.tensorflow.org/tensorboard).
-4. After finishing all experiments, apply the same result parser and aggregate relevant metrics for analysis.
-
-1 and 2 abstracts code and procedures into configuration with params,  which significantly decreases the cognitive load when planning for experiments. After specifying the result parsers, automating 3 and 4 can be a breeze with this tool.
-
-# Installation
+## Install
 
 ```commandline
 $ pip install mlrunner
 ```
+`python >= 3.7` is requred.
 
-dependencies: `python >= 3.7, pyyaml`
-
-# Usage
-
+## Usage
 Edit `params.yaml` in the repo and simply
 ```commandline
 $ run
 ```
+Then start a jupyter notebook to analyze results using `examine.Examiner`.
 
-For available command-line args, use 
+See `examples` for a typical use case of `examine.Examnier`. See comments in `params.yaml` for available configurations. For available command-line args, use 
 ```commandline
 $ run -h
 ```
-See comments in `params.yaml` for available configurations. For typical use cases see `examples`.
 
-
-# Example
-
+## Example
 Suppose we develop a new normalization layer "newnorm" and want to compare it to batchnorm. Both have a
 hyperparameter `--moment`. We also want to see how early stop affects our model, which is
 specified by a boolean flag `--early-stop`. Each run involves training, checkpoint average and test with the averaged checkpoint. Then `params.yaml` can be:
@@ -106,7 +94,7 @@ stat
 We provide `Examiner` as a container to iteratively apply a metric parser to all experiments and aggregate the results. In this example we simply parse the test log for the test BLEU:
 
 ```python
-from runner.examine import Examiner, latest_log
+from mlrunner.examine import Examiner, latest_log
 
 
 # define a metric parser for each directory (experiment)
@@ -126,7 +114,8 @@ examiner.add(add_bleu)
 # run all parsers for directories matched by regex 
 examiner.exam(output="output", regex=".*")
 # print the tsv table with all (different) params and metrics of each experiment
-examiner.table()
+# return a pandas DataFrame object.
+df = examiner.table(print_tsv=True)
 ```
 which results in
 ```commandline
@@ -137,7 +126,7 @@ batch	0.1	FALSE	14.4
 batch	0.05	FALSE	16.5
 batch	0.1	TRUE	15.0
 ```
-The table can be readily copied to excel or numbers for further analysis.
+A pandas `DataFrame` object is returned for further analysis.
 
 ## Under the hood
 

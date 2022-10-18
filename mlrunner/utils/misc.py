@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from ilock import ILock, ILockException
 
+
 # GPU sorting
 def query_gpus():
     """
@@ -135,10 +136,10 @@ def map_placeholder(spec, param):
     if isinstance(value, (str, int, float)):
         return shell_arg(value)
     elif isinstance(value, bool):
-        ValueError(
-                "boolean param {} no supported as {}, please specify it as {}.".format(repr(param),
-                                                                                       repr("{" + param + "}"),
-                                                                                       repr("[" + param + "]")))
+        raise ValueError("boolean param {} no supported "
+                         "as {}, please specify it as {}.".format(repr(param),
+                                                                  repr("{" + param + "}"),
+                                                                  repr("[" + param + "]")))
     else:
         raise ValueError("{} of type {} is supported. use str, int, or float.".format(repr(param), type(value)))
 
@@ -157,13 +158,13 @@ def map_replacement(spec, param):
 
 
 def json_load(filename):
-    with open(filename, "r") as fin:
+    with open(filename, "r", encoding="utf-8") as fin:
         d = json.load(fin)
     return d
 
 
 def json_dump(d, filename):
-    with open(filename, "w") as fout:
+    with open(filename, "w", encoding="utf-8") as fout:
         json.dump(d, fout, sort_keys=True, indent=4)
 
 
@@ -188,13 +189,13 @@ def lock(filename, poll=0.2, timeout=60):
 
 
 def yaml_load(filename):
-    with open(filename, "r") as fin:
+    with open(filename, "r", encoding="utf-8") as fin:
         d = yaml.load(fin, Loader=yaml.FullLoader)
     return d
 
 
 def yaml_dump(d, filename):
-    with open(filename, "w") as fout:
+    with open(filename, "w", encoding="utf-8") as fout:
         yaml.dump(d, stream=fout, width=1000000)
 
 
