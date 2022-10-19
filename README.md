@@ -1,25 +1,19 @@
-
 ![](logo.png)
-Maintaining many experiments while making the most of computation resource requires much manual effort. This lightweight tool helps you currently run a **LOT** of experiments with simple commands and configurations. You can aggregate custom metrics for each experiment with a single command.
+Maintaining many machine learning experiments requires much manual effort. This lightweight tool helps you currently run a **LOT** of experiments with simple commands and configurations. You can easily aggregate custom metrics for each experiment with a single line of code.
 
 ## Install
-
-```commandline
+```
 $ pip install mlrunner
 ```
-`python >= 3.7` is requred.
-
 ## Usage
-Edit `params.yaml` in the repo and simply
-```commandline
+Download and edit [params.yaml](https://raw.githubusercontent.com/simtony/mlrunner/main/params.yaml), then simply
+```
 $ run
 ```
-Then start a jupyter notebook to analyze results using `examine.Examiner`.
+When all experiments finish, start a jupyter notebook and analyze results using `examine.Examiner`.
 
-See `examples` for a typical use case of `examine.Examnier`. See comments in `params.yaml` for available configurations. For available command-line args, use 
-```commandline
-$ run -h
-```
+See `examples` for typical use cases. 
+See comments in `params.yaml` for available configurations. Use `run -h` for available command-line args.
 
 ## Example
 Suppose we develop a new normalization layer "newnorm" and want to compare it to batchnorm. Both have a
