@@ -18,7 +18,7 @@ See the [github repo](https://github.com/simtony/mlrunner) for example use cases
 
 setuptools.setup(
         name='mlrunner',
-        version='0.5.7.1',
+        version='0.5.8',
         author='Tony Ou',
         author_email='simtony2@gmail.com',
         url='https://github.com/simtony/mlrunner',
@@ -30,7 +30,7 @@ setuptools.setup(
             "License :: OSI Approved :: MIT License",
             "Operating System :: POSIX :: Linux",
         ],
-        install_requires=['pyyaml', 'tabulate', 'ilock', 'pandas'],
+        install_requires=['pyyaml', 'tabulate', 'ilock', 'pandas', "dill==0.3.6", "multiprocess==0.70.14"],
         packages=setuptools.find_packages(),
         python_requires='>=3.7',
         entry_points={

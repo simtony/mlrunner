@@ -1,11 +1,13 @@
 import collections
 import glob
+import multiprocessing
 import re
 import os
 import tabulate
 import pandas as pd
+from multiprocessing import Pool
 from pathlib import Path
-
+from multiprocess.pool import Pool
 from ..utils.misc import yaml_load
 
 Experiment = collections.namedtuple("Experiment", ["cache", "metric", "param"])
@@ -56,19 +58,53 @@ class Examiner(object):
     def add(self, func):
         self.exams.add(func)
 
-    def exam(self, output="output", regex=".*", verbose=False):
-        for i, path in enumerate(match_output(output, regex)):
+    def exam(self, output="output", regex=".*", verbose=False, workers=-1):
+        paths = match_output(output, regex)
+        if workers > 0:
+            self._exam_parallel(paths, verbose, workers)
+        else:
+            self._exam_serial(paths, verbose)
+
+    def _exam_serial(self, paths, verbose):
+        for path in paths:
             params = load_params(path)
             if params is None:
                 print("No 'params.yaml' found, skip {}".format(path))
                 continue
             if verbose:
-                print("{}: {}".format(i, path.name))
+                print(path.name)
             if path.name not in self.experiments:
                 self.experiments[path.name] = Experiment(cache={}, metric={}, param={})
             self.experiments[path.name].param.update(params)
-            for exam in self.exams:
-                exam(path, self.experiments[path.name], self.caches)
+            for e in self.exams:
+                e(path, self.experiments[path.name], self.caches)
+
+    def _exam_parallel(self, paths, verbose, workers):
+        """Parallel version of exam. May repeatedly build shared cache across experiments"""
+        def func(path):
+            params = load_params(path)
+            if params is None:
+                print("No 'params.yaml' found, skip {}\n".format(path), flush=True, end="")
+                return None, None, None
+            if verbose:
+                print(path.name + '\n', flush=True, end="")
+            experiment = Experiment(cache={}, metric={}, param=params)
+            caches = {}
+            for e in self.exams:
+                e(path, experiment, caches)
+            return path, experiment, caches
+
+        with Pool(processes=workers) as pool:
+            for path, experiment, caches in pool.map(func, paths):
+                if path is None:
+                    continue
+                if path.name not in self.experiments:
+                    self.experiments[path.name] = experiment
+                else:
+                    self.experiments[path.name].param.update(experiment.param)
+                    self.experiments[path.name].metric.update(experiment.metric)
+                    self.experiments[path.name].cache.update(experiment.cache)
+                self.caches.update(caches)
 
     def table(self, concise=True, print_tsv=False):
         params = set([(k, v) for experiment in self.experiments.values()
