@@ -310,6 +310,7 @@ def main():
 
     args = parser.parse_args()
     resources, templates, aliases, defaults, choices = load_yaml(args)
+    print(choices)
     tasks = build_tasks(args, templates, aliases, defaults, choices)
 
     os.makedirs(args.output, exist_ok=True)

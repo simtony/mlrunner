@@ -69,7 +69,7 @@ class Examiner(object):
         for path in paths:
             params = load_params(path)
             if params is None:
-                print("No 'params.yaml' found, skip {}".format(path))
+                print("No 'params' found, skip {}".format(path))
                 continue
             if verbose:
                 print(path.name)
@@ -81,10 +81,11 @@ class Examiner(object):
 
     def _exam_parallel(self, paths, verbose, workers):
         """Parallel version of exam. May repeatedly build shared cache across experiments"""
+
         def func(path):
             params = load_params(path)
             if params is None:
-                print("No 'params.yaml' found, skip {}\n".format(path), flush=True, end="")
+                print("No 'params' found, skip {}\n".format(path), flush=True, end="")
                 return None, None, None
             if verbose:
                 print(path.name + '\n', flush=True, end="")

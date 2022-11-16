@@ -54,7 +54,7 @@ def filter_choices(title, choices):
     if not choices:
         raise InvalidYAMLException("No choices available.")
     if title is not None:
-        title_unset = True  #
+        title_unset = True
         title_not_exist = True
         temp_choices = []
         for choice in choices:
@@ -73,6 +73,9 @@ def filter_choices(title, choices):
     for choice in choices:
         if "_title" in choice:
             del choice["_title"]
+        for key in list(choice.keys()):
+            if not isinstance(choice[key], (tuple, list)):
+                choice[key] = [choice[key]]
     return choices
 
 

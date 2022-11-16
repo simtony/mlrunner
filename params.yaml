@@ -82,6 +82,16 @@ _cmd: [ dtype ]
 dummy: [ "default_dtype" ]
 
 ---
+_title: default_concise
+# you can omit the square bracket for param with only one candidate value
+_cmd: dtype
+dummy: "default_dtype2"
+
+---
+# you can also use abbreviated form to avoid clutter
+{ _title: default_concise, _cmd: dtype, dummy: "default_dtype3" }
+
+---
 _title: replace
 # different types replacements
 _cmd: [ dtype ]

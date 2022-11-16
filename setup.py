@@ -18,7 +18,7 @@ See the [github repo](https://github.com/simtony/mlrunner) for example use cases
 
 setuptools.setup(
         name='mlrunner',
-        version='0.5.8',
+        version='0.5.9',
         author='Tony Ou',
         author_email='simtony2@gmail.com',
         url='https://github.com/simtony/mlrunner',
